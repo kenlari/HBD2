@@ -1555,7 +1555,7 @@ export default function App() {
       <main className="flex-1 flex flex-col min-w-0 pb-20 lg:pb-0 lg:max-w-[1100px] lg:mx-auto" id="main-canvas-wrapper">
         
         {/* TOP STATUS BAR ROW */}
-        <header className={`bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-4 justify-between items-start lg:items-center gap-4 z-10 text-left relative ${activeSection === "chat" ? "hidden md:flex flex-col lg:flex-row" : "flex flex-col lg:flex-row"}`} id="main-workspace-header">
+        <header className={`bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-4 justify-between items-start lg:items-center gap-4 z-10 text-left relative ${activeSection === "dashboard" ? "flex flex-col lg:flex-row" : "hidden"}`} id="main-workspace-header">
           
           {/* Mobile-only Branding Bar at top */}
 
@@ -1579,10 +1579,6 @@ export default function App() {
 
           {/* Quick Header actions integration */}
           <div className="flex flex-wrap md:flex-nowrap items-center gap-3 w-full md:w-auto">
-            <div className="flex bg-[#FAF9FF] border border-slate-200 px-2 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[10px] sm:text-xs font-semibold text-slate-600 shadow-xs items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse" />
-              <span>Next Birthday: {nextTarget.name} ({nextTargetDays} days left)</span>
-            </div>
             {/* Real-time Notification Bell Widget */}
             <button
               onClick={() => setShowNotificationDrawer(true)}
@@ -1628,46 +1624,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Global Theme Toggle */}
-            <button
-              type="button"
-              onClick={() => setIsDarkMode(prev => !prev)}
-              className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all cursor-pointer inline-flex items-center justify-center border border-slate-200 shadow-xs active:scale-95 shrink-0"
-              title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
-              id="header-theme-toggle-btn"
-            >
-              {isDarkMode ? (
-                <Sun className="w-4 h-4 text-amber-500 animate-[spin_12s_linear_infinite]" />
-              ) : (
-                <Moon className="w-4 h-4 text-indigo-600" />
-              )}
-            </button>
 
-            {/* Header Settings Button */}
-            <button
-              type="button"
-              onClick={() => setIsProfileSettingsOpen(true)}
-              className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all cursor-pointer inline-flex items-center justify-center border border-slate-200"
-              title="Open profile settings"
-              id="header-settings-btn"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-
-
-            {/* QR Scanner Direct Header Trigger */}
-            <button
-              onClick={() => {
-                setShowAddProfile(true);
-                setIsQrScannerActive(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-2.5 bg-[#FAF9FF] border border-indigo-200 hover:bg-indigo-50 hover:border-indigo-300 text-indigo-700 rounded-xl text-xs font-bold shadow-xs transition-with-all cursor-pointer active:scale-95 shrink-0"
-              title="Scan buddy profile QR card"
-              id="header-scan-buddy-btn"
-            >
-              <Camera className="w-4 h-4 text-indigo-600 animate-pulse" />
-              <span className="hidden sm:inline">Scan QR</span>
-            </button>
 
             <button
               onClick={() => {
