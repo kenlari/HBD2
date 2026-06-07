@@ -1,0 +1,217 @@
+@import "tailwindcss";
+
+/* -------------------------------------------------------------
+   GLOBAL THEMING ENHANCEMENT FOR CONSISTENT DARK/LIGHT VIEWS
+------------------------------------------------------------- */
+
+/* Base Light and Dark Mode Rules */
+:root {
+  color-scheme: light;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+/* Core dark mode color theme overrides mapping */
+.dark body {
+  background-color: #0b0f19;
+  color: #f8fafc;
+}
+
+/* Root app container viewport background color */
+.dark #bloom-app-root {
+  background-color: #0b0f19 !important;
+  color: #dfe4ec !important;
+}
+
+/* Sidebar header / sidebar footer adjustments to keep contrast elegant */
+.dark #sidebar-panel {
+  background-color: #080c14 !important;
+  border-color: #171f30 !important;
+}
+
+.dark #sidebar-panel button {
+  color: #94a3b8;
+}
+
+.dark #sidebar-panel button:hover {
+  background-color: #1a2035/50 !important;
+  color: #ffffff !important;
+}
+
+/* Highlighting currently active sidebar layout link */
+.dark #sidebar-panel button.bg-indigo-600 {
+  background-color: #4f46e5 !important;
+  color: #ffffff !important;
+}
+
+/* Header styling in dark mode */
+.dark #main-workspace-header {
+  background-color: #111827 !important; /* Slate-like background */
+  border-color: #1f2937 !important; /* Crisp divider matching dark panels */
+  color: #f8fafc !important;
+}
+
+.dark #main-workspace-header h2,
+.dark #main-workspace-header h1,
+.dark #main-workspace-header span,
+.dark #main-workspace-header p {
+  color: #f8fafc !important;
+}
+
+.dark #main-workspace-header .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+/* Soft inline informational state tag in the header */
+.dark #main-workspace-header .bg-\[\#FAF9FF\] {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #cbd5e1 !important;
+}
+
+/* Cards, blocks, panels, interactive containers */
+.dark .bg-white {
+  background-color: #151d30 !important; /* Elevated elegant dark slate card */
+  border-color: #232d45 !important;
+  color: #f8fafc !important;
+}
+
+.dark .bg-slate-50 {
+  background-color: #0f172a !important; /* deep canvas base background */
+}
+
+.dark .bg-slate-100 {
+  background-color: #1e293b !important;
+  border-color: #2e3c54 !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .bg-indigo-50 {
+  background-color: rgba(99, 102, 241, 0.12) !important;
+  border-color: rgba(99, 102, 241, 0.3) !important;
+  color: #a5b4fc !important;
+}
+
+.dark .text-indigo-600,
+.dark .text-indigo-700 {
+  color: #818cf8 !important;
+}
+
+/* Soft grey backgrounds in buttons, alerts, state controls */
+.dark .hover\:bg-slate-50:hover {
+  background-color: #182235 !important;
+}
+
+.dark .hover\:bg-slate-100:hover {
+  background-color: #1f293d !important;
+}
+
+.dark .hover\:bg-slate-200:hover {
+  background-color: #28354f !important;
+}
+
+/* Ensure all primary headers, details, lists match high readability */
+.dark .text-slate-900,
+.dark .text-slate-850,
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-zinc-800,
+.dark .text-zinc-900 {
+  color: #f1f5f9 !important;
+}
+
+.dark .text-slate-650,
+.dark .text-slate-600,
+.dark .text-slate-500,
+.dark .text-zinc-600,
+.dark .text-zinc-700 {
+  color: #cbd5e1 !important; /* highly eligible light secondary */
+}
+
+.dark .text-slate-400,
+.dark .text-zinc-400 {
+  color: #94a3b8 !important; /* clean silver text label style */
+}
+
+/* Divider blocks & border styles */
+.dark .border-slate-100,
+.dark .border-slate-150,
+.dark .border-slate-200,
+.dark .border-slate-250,
+.dark .border-slate-300,
+.dark .border-indigo-100,
+.dark .border-rose-100,
+.dark .border-slate-205,
+.dark .border-slate-350 {
+  border-color: #232d45 !important;
+}
+
+/* Form fields input tags and interactive controls styling */
+.dark input[type="text"],
+.dark input[type="number"],
+.dark input[type="date"],
+.dark select,
+.dark textarea {
+  background-color: #0b0f19 !important;
+  color: #f8fafc !important;
+  border-color: #232d45 !important;
+}
+
+.dark input[type="text"]::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+.dark select option {
+  background-color: #151d30 !important;
+  color: #f8fafc !important;
+}
+
+/* Quick utility alerts panel overlay and lists */
+.dark #my-profile-banner {
+  background-color: #111827 !important;
+  border-color: #232d45 !important;
+}
+
+.dark #profile-subtab-settings-deck div.bg-slate-50 {
+  background-color: #151d30 !important;
+}
+
+/* Modal window styling matching high dark aesthetic */
+.dark .fixed.inset-0.bg-slate-950\/50 {
+  background-color: rgba(3, 7, 18, 0.75) !important;
+}
+
+.dark .fixed.inset-0.z-50 .bg-white {
+  background-color: #111827 !important;
+  border-color: #232d45 !important;
+}
+
+.dark .fixed.inset-0 b,
+.dark .fixed.inset-0 p,
+.dark .fixed.inset-0 span {
+  color: #f8fafc;
+}
+
+/* Keep the interactive charts readable */
+.dark .recharts-cartesian-grid-horizontal line,
+.dark .recharts-cartesian-grid-vertical line {
+  stroke: #232d45 !important;
+}
+
+.dark .recharts-text {
+  fill: #94a3b8 !important;
+}
+
+.dark .recharts-legend-item-text {
+  color: #f1f5f9 !important;
+}
+
+.dark .recharts-default-tooltip {
+  background-color: #151d30 !important;
+  border-color: #232d45 !important;
+  color: #f8fafc !important;
+}
