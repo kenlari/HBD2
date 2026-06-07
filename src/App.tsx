@@ -391,6 +391,19 @@ export default function App() {
   const [isGiftProcessing, setIsGiftProcessing] = useState<boolean>(false);
   const [giftProcessingStep, setGiftProcessingStep] = useState<string>("");
 
+  const [walletBalance, setWalletBalance] = useState<number>(() => {
+    const saved = localStorage.getItem("hbd_wallet_balance");
+    return saved ? parseFloat(saved) : 0;
+  });
+  const [depositAmount, setDepositAmount] = useState<string>("");
+  const [withdrawAmount, setWithdrawAmount] = useState<string>("");
+  const [showDepositForm, setShowDepositForm] = useState<boolean>(false);
+  const [showWithdrawForm, setShowWithdrawForm] = useState<boolean>(false);
+
+  useEffect(() => {
+    localStorage.setItem("hbd_wallet_balance", String(walletBalance));
+  }, [walletBalance]);
+
   // Helper to format currency values based on global settings
   const getFormattedPrice = (usdAmount: number) => {
     switch (globalCurrency) {
@@ -1545,16 +1558,6 @@ export default function App() {
         <header className={`bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-4 justify-between items-start lg:items-center gap-4 z-10 text-left relative ${activeSection === "chat" ? "hidden md:flex flex-col lg:flex-row" : "flex flex-col lg:flex-row"}`} id="main-workspace-header">
           
           {/* Mobile-only Branding Bar at top */}
-          <div className="md:hidden flex w-full justify-between items-center pb-2.5 border-b border-slate-100 mb-0.5" id="mobile-workspace-brand">
-            <div className="flex items-center gap-2">
-              <span className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-black text-sm shadow-xs">
-                B
-              </span>
-              <h1 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1">
-                BloomBirth <span className="text-[8px] bg-indigo-100 text-indigo-600 px-1 py-0.2 rounded font-mono uppercase font-black">Pro</span>
-              </h1>
-            </div>
-          </div>
 
           <div className="flex w-full md:w-auto items-center justify-between md:justify-start gap-4">
             <div>
@@ -5379,33 +5382,138 @@ export default function App() {
           {/* ==================== SCREEN 7.5: IN-APP GIFT STORE ==================== */}
           {activeSection === "gift-store" && (
             <div className="space-y-6 text-left animate-fade-in" id="view-gift-store-hull">
-              {/* Boutique Banner Header */}
-              <div className="bg-gradient-to-r from-rose-950 via-slate-900 to-indigo-950 p-6 md:p-8 rounded-3xl text-left text-white shadow-xl relative overflow-hidden border border-rose-900/30">
-                <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-radial from-rose-500/10 to-transparent pointer-events-none" />
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-                  <div className="space-y-2 text-left">
-                    <span className="bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest px-2.5 py-1 rounded-lg uppercase border border-rose-500/20">
-                      Celebration Boutique
-                    </span>
-                    <h3 className="text-xl md:text-3xl font-black text-white flex items-center gap-2">
-                      <Gift className="w-6 h-6 text-rose-455 animate-bounce" />
-                      <span>The Interactive Companion Gift Store</span>
-                    </h3>
-                    <p className="text-xs text-rose-100 max-w-2xl font-sans leading-relaxed">
-                      Send luxury roses, vibrant flower bouquets, or Golden cash gift tokens directly to your companions. Every present is wrapped inside an interactive virtual parcel complete with custom dedication notes and instant chimes!
+              {/* My Wallet Card */}
+              <div className="bg-white border border-slate-200 rounded-[2rem] p-6 md:p-8 shadow-sm text-left relative overflow-hidden transition-all duration-300 hover:shadow-md" id="wallet-card-container">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">👛</span>
+                      <h3 className="text-xl font-black text-slate-900 dark:text-white">My Wallet</h3>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Available Balance</span>
+                      <div className="text-3xl font-black text-slate-900 dark:text-white font-mono">
+                        GHS {walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-400 max-w-md italic font-sans">
+                      Gifts received on your birthday are paid into your wallet automatically
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 bg-slate-900/80 p-2 rounded-2xl border border-slate-800 shrink-0 text-left">
-                    <div className="w-10 h-10 bg-rose-500/10 text-rose-400 rounded-xl flex items-center justify-center font-bold">
-                      🎁
-                    </div>
-                    <div>
-                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Balance Source</span>
-                      <span className="text-xs font-black text-rose-350 font-mono">Unlimited Sandbox Cash</span>
-                    </div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDepositForm(!showDepositForm);
+                        setShowWithdrawForm(false);
+                      }}
+                      className={`px-5 py-2.5 rounded-xl font-extrabold text-xs transition duration-200 cursor-pointer ${
+                        showDepositForm 
+                          ? "bg-indigo-105 text-indigo-700 bg-indigo-50 border border-indigo-200" 
+                          : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
+                      }`}
+                    >
+                      Deposit ↗
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowWithdrawForm(!showWithdrawForm);
+                        setShowDepositForm(false);
+                      }}
+                      className={`px-5 py-2.5 rounded-xl font-extrabold text-xs transition duration-200 cursor-pointer ${
+                        showWithdrawForm 
+                          ? "bg-slate-205 text-slate-800 bg-slate-100 border border-slate-300" 
+                          : "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200"
+                      }`}
+                    >
+                      Withdraw ↙
+                    </button>
                   </div>
                 </div>
+
+                {/* Expanded Deposit Form */}
+                {showDepositForm && (
+                  <div className="mt-4 pt-4 border-t border-slate-100 animate-slide-down space-y-3 max-w-md">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Amount to Deposit (GHS)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="e.g. 50"
+                        value={depositAmount}
+                        onChange={(e) => setDepositAmount(e.target.value)}
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const amt = parseFloat(depositAmount);
+                          if (!amt || amt <= 0 || isNaN(amt)) {
+                            triggerToast("Error", "Please enter a valid positive deposit amount.");
+                            return;
+                          }
+                          setWalletBalance(prev => prev + amt);
+                          triggerToast("Deposit Successful 🎉", `Added GHS ${amt.toFixed(2)} to your wallet balance.`);
+                          setDepositAmount("");
+                          setShowDepositForm(false);
+                          if (soundEffectsEnabled) {
+                            try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
+                          }
+                        }}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                      >
+                        Confirm Deposit
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Expanded Withdraw Form */}
+                {showWithdrawForm && (
+                  <div className="mt-4 pt-4 border-t border-slate-100 animate-slide-down space-y-3 max-w-md">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Amount to Withdraw (GHS)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="e.g. 20"
+                        value={withdrawAmount}
+                        onChange={(e) => setWithdrawAmount(e.target.value)}
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const amt = parseFloat(withdrawAmount);
+                          if (!amt || amt <= 0 || isNaN(amt)) {
+                            triggerToast("Error", "Please enter a valid positive withdrawal amount.");
+                            return;
+                          }
+                          if (amt > walletBalance) {
+                            triggerToast("Insufficient Funds", "You do not have enough balance to withdraw this amount.");
+                            return;
+                          }
+                          setWalletBalance(prev => prev - amt);
+                          triggerToast("Withdrawal Successful 💸", `Withdrew GHS ${amt.toFixed(2)} from your wallet balance.`);
+                          setWithdrawAmount("");
+                          setShowWithdrawForm(false);
+                          if (soundEffectsEnabled) {
+                            try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
+                          }
+                        }}
+                        className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                      >
+                        Confirm Withdraw
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Sub Navigation Switcher */}
@@ -5420,7 +5528,7 @@ export default function App() {
                   }`}
                 >
                   <Gift className="w-3.5 h-3.5 text-rose-505" />
-                  <span>Boutique Inventory</span>
+                  <span>Send Gifts</span>
                 </button>
                 <button
                   type="button"
@@ -5432,7 +5540,7 @@ export default function App() {
                   }`}
                 >
                   <Activity className="w-3.5 h-3.5 text-indigo-505" />
-                  <span>Delivery Ledger ({sentGifts.length})</span>
+                  <span>Sent Gifts ({sentGifts.length})</span>
                 </button>
               </div>
 
@@ -5526,7 +5634,7 @@ export default function App() {
                   <div>
                     <h4 className="font-extrabold text-sm text-zinc-900 flex items-center gap-2">
                       <Activity className="w-4.5 h-4.5 text-indigo-600 animate-pulse" />
-                      <span>Transmitted Celebration Deliveries Log</span>
+                      <span>Sent Gifts History</span>
                     </h4>
                     <p className="text-[11px] text-slate-500 mt-0.5">
                       Check live statuses or recall dedications sent via Mobile Money or Secure Credit Cards.
@@ -5746,6 +5854,14 @@ export default function App() {
                             </span>
                           </div>
 
+                          {/* Insufficient balance validation card */}
+                          {walletBalance < (customGiftStoreItem.usdPrice * 12) && (
+                            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800 flex items-center gap-2 animate-pulse">
+                              <span>⚠️</span>
+                              <span>Insufficient balance — please deposit first</span>
+                            </div>
+                          )}
+
                           {/* Error block if no friends */}
                           {friends.length === 0 && (
                             <p className="text-[10px] text-rose-600 font-bold">
@@ -5756,7 +5872,7 @@ export default function App() {
                           {/* Submit button */}
                           <button
                             type="button"
-                            disabled={friends.length === 0}
+                            disabled={friends.length === 0 || walletBalance < (customGiftStoreItem.usdPrice * 12)}
                             onClick={() => {
                               setIsGiftProcessing(true);
                               setGiftProcessingStep("Linking with Secure Momo Node...");
@@ -5772,6 +5888,11 @@ export default function App() {
                               setTimeout(() => {
                                 // Finalize checkout
                                 const selectedFriend = friends.find(f => f.id === giftRecipientId) || friends[0];
+                                const priceInGhs = customGiftStoreItem.usdPrice * 12;
+                                
+                                // Deduct from wallet balance
+                                setWalletBalance(prev => Math.max(0, prev - priceInGhs));
+
                                 const formattedPriceString = getFormattedPrice(customGiftStoreItem.usdPrice);
                                 const newGiftLog: SentGift = {
                                   id: "gift_tx_" + Date.now(),
@@ -5815,7 +5936,7 @@ export default function App() {
                               }, 3500);
                             }}
                             className={`w-full py-3.5 text-center text-xs font-black rounded-xl text-white transition-all cursor-pointer ${
-                              friends.length === 0
+                              (friends.length === 0 || walletBalance < (customGiftStoreItem.usdPrice * 12))
                                 ? "bg-slate-300 font-bold"
                                 : "bg-rose-600 hover:bg-rose-700 shadow-md shadow-rose-200"
                             }`}
