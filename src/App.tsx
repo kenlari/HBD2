@@ -3898,29 +3898,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Complete System Logs History */}
-                    <div className="bg-white rounded-[2rem] border border-slate-200 p-6 md:p-8 space-y-4">
-                      <div className="flex justify-between items-center border-b pb-3 border-slate-150">
-                        <h4 className="font-bold text-sm text-slate-905 flex items-center gap-1.5 uppercase tracking-wide">
-                          <Activity className="w-4 h-4 text-indigo-600 animate-spin" /> Workspace Active Activity Ledger
-                        </h4>
-                        <button 
-                          onClick={handleClearLogs}
-                          className="text-xs text-indigo-650 hover:underline font-bold"
-                        >
-                          Clear history logs
-                        </button>
-                      </div>
-
-                      <div className="space-y-1.5 font-mono text-[11px] text-slate-600 max-h-[300px] overflow-y-auto bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                        {logs.map((log, index) => (
-                          <div key={index} className="py-1 border-b border-slate-100 last:border-0 leading-relaxed break-words">
-                            {log}
-                          </div>
-                        ))}
-                        {logs.length === 0 && <p className="text-slate-400 italic font-sans">No operations recorded yet.</p>}
-                      </div>
-                    </div>
                   </div>
                 )}
               </div>
@@ -4127,6 +4104,19 @@ export default function App() {
               {/* Introduction Banner */}
               <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 rounded-3xl text-left text-white shadow-xl relative overflow-hidden">
                 <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-radial from-indigo-500/10 to-transparent pointer-events-none" />
+                <button
+  type="button"
+  onClick={() => setIsDarkMode(prev => !prev)}
+  className="absolute right-16 top-4 inline-flex items-center justify-center h-10 w-10 rounded-2xl bg-white/10 text-white hover:bg-white/20 border border-white/20 transition"
+  title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+>
+  {isDarkMode ? (
+    <Sun className="w-5 h-5 text-amber-400" />
+  ) : (
+    <Moon className="w-5 h-5" />
+  )}
+</button>
+
                 <button
                   type="button"
                   onClick={() => setIsProfileSettingsOpen(true)}
@@ -4843,125 +4833,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* COLUMN 2: Companion Search Bar & Explorer list to "add up others to it" (Span 6) */}
-                <div className="lg:col-span-6 bg-white rounded-[2rem] border border-slate-200 p-6 shadow-xs flex flex-col justify-between">
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
-                        <Search className="w-4.5 h-4.5 text-indigo-650 animate-pulse" />
-                        <span>Companion Network Search</span>
-                      </h4>
-                      <p className="text-[11px] text-zinc-500 mt-0.5">
-                        Add others to your circle by discovering handles, interests, or names.
-                      </p>
-                    </div>
-
-                    {/* Integrated Search Bar */}
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Search className="h-4 w-4 text-slate-400" />
-                      </span>
-                      <input
-                        type="text"
-                        value={signinSearchQuery}
-                        onChange={(e) => setSigninSearchQuery(e.target.value)}
-                        placeholder="Search by name, @handle or tags (e.g. baking, barbecue, zen)..."
-                        className="w-full bg-slate-50 hover:bg-slate-100/60 transition-colors border border-slate-200 rounded-xl pl-9 pr-8 py-2.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                      />
-                      {signinSearchQuery && (
-                        <button
-                          onClick={() => setSigninSearchQuery("")}
-                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-450 hover:text-slate-650 cursor-pointer"
-                        >
-                          <X className="w-4.5 h-4.5" />
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Matches directory rendering */}
-                    <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
-                      {(() => {
-                        const query = signinSearchQuery.toLowerCase().trim();
-                        
-                        const filteredProfiles = MOCK_EXTERNAL_PROFILES.filter(p => {
-                          if (!query) return true;
-                          return (
-                            p.name.toLowerCase().includes(query) ||
-                            p.username.toLowerCase().includes(query) ||
-                            p.interests.some(i => i.toLowerCase().includes(query))
-                          );
-                        });
-
-                        if (filteredProfiles.length === 0) {
-                          return (
-                            <div className="bg-slate-50 rounded-2xl border border-slate-200 p-8 text-center text-xs text-slate-400 font-semibold leading-relaxed">
-                              No profiles match search query. Try lookups like &quot;clara&quot;, &quot;david&quot;, or hobbies like &quot;cozy&quot; or &quot;coffee&quot;.
-                            </div>
-                          );
-                        }
-
-                        return filteredProfiles.map((p) => {
-                          const isConnected = friends.some((f) => f.id === p.id);
-
-                          return (
-                            <div 
-                              key={p.id}
-                              className="p-3.5 bg-slate-50/60 hover:bg-slate-50 border border-slate-150 rounded-2xl transition flex items-start justify-between gap-3 text-left"
-                            >
-                              <div className="flex items-start gap-2.5 min-w-0">
-                                <span className={`w-8.5 h-8.5 rounded-xl flex items-center justify-center font-bold text-xs text-white shrink-0 ${p.avatar}`}>
-                                  {p.name.split(" ").map(n => n[0]).join("")}
-                                </span>
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-xs font-black text-slate-800 truncate leading-tight block">{p.name}</span>
-                                  </div>
-                                  <span className="text-[10px] text-indigo-600 font-mono font-extrabold block">@{p.username}</span>
-                                  <span className="text-[9.5px] text-slate-400 block mt-0.5">🍰 Birthday: {p.birthday.substring(5)} ({p.age} yrs old)</span>
-
-                                  {/* Interests micro tags */}
-                                  <div className="flex flex-wrap gap-1 mt-1.5">
-                                    {p.interests.slice(0, 3).map((tag, i) => (
-                                      <span key={i} className="text-[8.5px] font-bold text-slate-500 bg-slate-200/50 px-1.5 py-0.2 rounded">
-                                        #{tag}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {isConnected ? (
-                                <span className="bg-emerald-50 text-emerald-600 text-[10px] font-black px-2.5 py-1.5 rounded-xl flex items-center gap-1 shrink-0 select-none border border-emerald-500/20">
-                                  <Check className="w-3 h-3 stroke-[3.5]" />
-                                  <span>Added</span>
-                                </span>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setPendingConnectProfile(p);
-                                    setShowRelationModal(true);
-                                  }}
-                                  className="text-[10px] font-black text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-xl transition shadow-sm cursor-pointer shrink-0"
-                                >
-                                  Connect +
-                                </button>
-                              )}
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-
-                  </div>
-
-                  {/* Info panel */}
-                  <div className="bg-[#FAF9FF] border border-indigo-100 p-3 rounded-2xl flex gap-2.5 mt-4 items-start">
-                    <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
-                    <p className="text-[10.5px] text-slate-500 leading-normal">
-                      Adding companions here immediately registers their profiles, schedules automated celebration calendar tags, and schedules the live simulated posting of their wishlist targets.
-                    </p>
-                  </div>
-                </div>
               </div>
             )}
 
@@ -5077,21 +4948,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* ==================== SUB-TAB 3: WIDGET SIMULATOR ==================== */}
-              {activeSection === "profile" && profileSubTab === "profile" && (
-                <div className="space-y-6 animate-fade-in" id="profile-subtab-widgets">
-                  <div className="bg-white p-6 rounded-3xl border border-slate-200 text-left header-explain-widgets">
-                    <h3 className="font-black text-lg text-slate-900">Interactive Device Complication Simulator</h3>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Adjust preferences on the customizer control panel to see live lock screen complications or homescreen frames automatically synchronized dynamically.
-                    </p>
-                  </div>
-
-                  <div className="bg-slate-50 rounded-[2rem] border border-slate-200/50 p-2 md:p-4">
-                    <WidgetSimulator friends={friends} />
-                  </div>
-                </div>
-              )}
 
               {/* ==================== SUB-TAB 4: TROPHIES & LOGS ==================== */}
               {activeSection === "profile" && profileSubTab === "trophies" && (
@@ -5185,29 +5041,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Complete System Logs History */}
-                  <div className="bg-white rounded-[2rem] border border-slate-200 p-6 md:p-8 space-y-4">
-                    <div className="flex justify-between items-center border-b pb-3 border-slate-150">
-                      <h4 className="font-bold text-sm text-slate-905 flex items-center gap-1.5 uppercase tracking-wide">
-                        <Activity className="w-4 h-4 text-indigo-600 animate-spin" /> Workspace Active Activity Ledger
-                      </h4>
-                      <button 
-                        onClick={handleClearLogs}
-                        className="text-xs text-indigo-650 hover:underline font-bold"
-                      >
-                        Clear history logs
-                      </button>
-                    </div>
-
-                    <div className="space-y-1.5 font-mono text-[11px] text-slate-600 max-h-[300px] overflow-y-auto bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                      {logs.map((log, index) => (
-                        <div key={index} className="py-1 border-b border-slate-100 last:border-0 leading-relaxed break-words">
-                          {log}
-                        </div>
-                      ))}
-                      {logs.length === 0 && <p className="text-slate-400 italic font-sans">No operations recorded yet.</p>}
-                    </div>
-                  </div>
                 </div>
               )}
 
