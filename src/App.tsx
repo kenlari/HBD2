@@ -535,20 +535,6 @@ export default function App() {
       } catch (e) {
         // Safe catch
       }
-    } else {
-      const defaultSession = {
-        name: "Alex Patel",
-        username: "alex_patel",
-        email: "alex@example.com",
-        phone: "+233241234567",
-        whatsapp: "+233241234567",
-        birthday: "1997-06-25",
-        avatar: "bg-teal-500",
-        interests: ["Photography", "Specialty Coffee", "Cyberpunk Novels", "Mechanic Keyboards"],
-        accountType: accountType,
-        snapchatUsername: "alex_snap"
-      };
-      localStorage.setItem("birthday_authenticated_user", JSON.stringify(defaultSession));
     }
   }, [accountType]);
 
@@ -820,7 +806,7 @@ export default function App() {
   useEffect(() => {
     if (activeSection === "my-wishlist") {
       setActiveSection("registry");
-      setRegistrySubTab("wishlist");
+      setRegistrySubTab("list");
     } else if (activeSection === "widgets") {
       setActiveSection("registry");
       setRegistrySubTab("widgets");
@@ -944,20 +930,25 @@ export default function App() {
       isClaimed: false
     };
 
+    const isSelfWishlist = profileSubTab === "wishlist";
+    const targetFriendId = isSelfWishlist ? "alex" : selectedFriendId;
+
     const updated = friends.map((f) => {
-      if (f.id === selectedFriendId) {
+      if (f.id === targetFriendId) {
         return { ...f, wishlist: [...f.wishlist, newWish] };
       }
       return f;
     });
 
+    const targetFriend = updated.find((f) => f.id === targetFriendId) || selectedFriend;
+
     setFriends(updated);
-    appendLog(`Added item "${newItemTitle}" to ${selectedFriend.name}'s desires directory.`);
+    appendLog(`Added item "${newItemTitle}" to ${targetFriend.name}'s desires directory.`);
     setNewItemTitle("");
     setNewItemPrice("");
     setNewItemUrl("");
     setIsAddingWish(false);
-    triggerToast("Desire Saved", `Added to ${selectedFriend.name}'s wishlist folder.`);
+    triggerToast("Desire Saved", `Added to ${targetFriend.name}'s wishlist folder.`);
 
     const selfUser = updated.find((f) => f.id === "alex");
     if (selfUser && selfUser.wishlist.length >= 3) {
@@ -1343,6 +1334,7 @@ export default function App() {
   // Filter buddies list according to query and relationship group
   const getFilteredFriends = () => {
     return friends.filter(friend => {
+      if (friend.id === "alex") return false;
       const matchesSearch = friend.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             friend.interests.some(i => i.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCategory = filterRelationship === "All" || friend.relationship === filterRelationship;
@@ -1369,6 +1361,7 @@ export default function App() {
       return (
         <LoginPage 
           onLogin={(session) => {
+            localStorage.setItem("birthday_authenticated_user", JSON.stringify(session));
             setUserSession(session);
             setActiveSection("dashboard");
           }}
@@ -1381,6 +1374,7 @@ export default function App() {
     return (
       <SignUpFlow
         onComplete={(session) => {
+          localStorage.setItem("birthday_authenticated_user", JSON.stringify(session));
           setUserSession(session);
           setActiveSection("dashboard");
           triggerToast("Welcome to HBD! 🎉", `Account created for ${session.name}!`);
@@ -1502,17 +1496,7 @@ export default function App() {
               </span>
             </button>
 
-            <button
-              onClick={() => setActiveSection("chat")}
-              className={`w-full px-4 py-3 rounded-xl text-xs font-bold transition-all flex items-center gap-3 ${
-                activeSection === "chat"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/30 font-extrabold"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-              }`}
-            >
-              <MessageSquare className="w-4 h-4 text-violet-400" />
-              <span>Chat &amp; Wishes</span>
-            </button>
+
 
             <button
               onClick={() => setActiveSection("gift-store")}
@@ -2064,7 +2048,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* PRIMARY SUBCOL VIEWS PORTAL */}
-        <div className={`flex-1 overflow-y-auto ${activeSection === "chat" ? "p-0 overflow-x-hidden" : "p-6 md:p-8"}`} id="workspace-viewport">
+        <div className="flex-1 overflow-y-auto p-6 md:p-8" id="workspace-viewport">
           
           {/* ==================== SCREEN 1: EXECUTIVE COMMAND CENTER ==================== */}
           {activeSection === "dashboard" && (
@@ -2938,14 +2922,7 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-4"
                   >
-                    <div className="bg-white rounded-[2rem] border border-slate-200 p-5 shadow-xs text-left">
-                      <div className="flex items-center gap-2 mb-3.5 border-b border-slate-100 pb-2 bg-slate-50/40 p-2 rounded-xl">
-                        <UserPlus className="w-4 h-4 text-indigo-600" />
-                        <div>
-                          <h4 className="font-extrabold text-sm text-slate-855">Connect New Companion</h4>
-                          <p className="text-[10px] text-slate-400">Add from Address Book or lookup by Handle</p>
-                        </div>
-                      </div>
+                    <div className="space-y-3 text-left">
 
                       {/* Pill Method selector */}
                       <div className="flex bg-slate-100 p-1 rounded-xl mb-4 text-xs font-bold font-sans">
@@ -2982,49 +2959,34 @@ export default function App() {
                             {MOCK_EXTERNAL_PROFILES.map(p => {
                               const isConnected = friends.some(f => f.id === p.id);
                               
-                              return (
-                                <div 
-                                  key={p.id}
-                                  className="p-3 bg-slate-50 hover:bg-slate-100/75 rounded-2xl border border-slate-150 transition text-left flex flex-col justify-between gap-2.5"
-                                >
-                                  <div className="flex justify-between items-start gap-1">
-                                    <div className="flex items-center gap-2">
-                                      <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-[11px] text-white font-serif font-bold ${p.avatar}`}>
-                                        {p.name.split(" ").map(n => n[0]).join("")}
-                                      </span>
-                                      <div className="min-w-0">
-                                        <span className="text-xs font-bold text-slate-800 block truncate">{p.name}</span>
-                                        <span className="text-[9.5px] font-mono text-slate-400 block">{p.phone} • Birthday: {formatBirthdayDate(p.birthday)}</span>
-                                      </div>
-                                    </div>
-
-                                    {isConnected ? (
-                                      <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-200/60 p-1 px-2.5 rounded-lg shrink-0">
-                                        Connected
-                                      </span>
-                                    ) : (
-                                      <button
-                                        onClick={() => handleImportInitiate(p)}
-                                        className="text-[10.5px] font-extrabold text-indigo-600 hover:text-indigo-800 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100/50 p-1 px-2.5 rounded-lg shrink-0 transition"
-                                      >
-                                        Import +
-                                      </button>
-                                    )}
-                                  </div>
-
-                                  {/* Interests Shelf - "so that you can know their interests" */}
-                                  <div className="bg-white rounded-lg p-1.5 border border-slate-100 text-[10.5px] leading-relaxed flex items-baseline gap-1">
-                                    <span className="font-bold text-slate-400 shrink-0">Interests:</span>
-                                    <div className="flex flex-wrap gap-1">
-                                      {p.interests.map((tag, i) => (
-                                        <span key={i} className="text-[9.5px] text-slate-600 bg-slate-100 px-1 py-0.2 rounded">
-                                          #{tag}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                </div>
-                              );
+return (
+  <div
+    key={p.id}
+    className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 hover:bg-slate-50 transition"
+  >
+    <div className="flex items-center gap-2.5">
+      <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${p.avatar}`}>
+        {p.name.split(" ").map(n => n[0]).join("")}
+      </span>
+      <div>
+        <span className="text-xs font-bold text-slate-800 block">{p.name}</span>
+        <span className="text-[10px] text-indigo-500 font-mono">@{p.username}</span>
+      </div>
+    </div>
+    {isConnected ? (
+      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
+        Connected
+      </span>
+    ) : (
+      <button
+        onClick={() => handleImportInitiate(p)}
+        className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl cursor-pointer"
+      >
+        Import +
+      </button>
+    )}
+  </div>
+);
                             })}
                           </div>
                         </div>
@@ -3062,52 +3024,37 @@ export default function App() {
                                 const isConnected = friends.some(f => f.id === p.id);
 
                                 return (
-                                  <div 
-                                    key={p.id}
-                                    className="p-3 bg-slate-50 rounded-2xl border border-slate-150 text-left flex flex-col gap-2 transition"
-                                  >
-                                    <div className="flex justify-between items-start gap-1">
-                                      <div className="flex items-center gap-2">
-                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs text-white ${p.avatar}`}>
-                                          {p.name.split(" ").map(n => n[0]).join("")}
-                                        </div>
-                                        <div>
-                                          <span className="text-xs font-bold text-slate-800 block">{p.name}</span>
-                                          <span className="text-[10px] text-indigo-600 block bg-indigo-50 px-1 py-0.2 rounded w-fit font-mono font-bold mt-0.5">@{p.username}</span>
-                                        </div>
-                                      </div>
-
-                                      {isConnected ? (
-                                        <span className="text-[10px] font-black text-slate-400 bg-slate-200 p-1 px-2 rounded-lg">
-                                          Connected
-                                        </span>
-                                      ) : (
-                                        <button
-                                          onClick={() => handleImportInitiate(p)}
-                                          className="text-[10.5px] font-black text-white bg-indigo-600 hover:bg-indigo-700 p-1 px-2.5 rounded-lg transition"
-                                        >
-                                          Connect Handle +
-                                        </button>
-                                      )}
-                                    </div>
-
-                                    {/* Interests banner */}
-                                    <div className="bg-white rounded-lg p-1.5 border border-slate-100 text-[10.5px] flex items-baseline gap-1">
-                                      <span className="font-extrabold text-slate-450 shrink-0 font-mono">Interests:</span>
-                                      <div className="flex flex-wrap gap-1">
-                                        {p.interests.map((tag, i) => (
-                                          <span key={i} className="text-[9px] text-indigo-750 bg-indigo-50 font-bold px-1 rounded">
-                                            #{tag}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        </div>
-                      )}
+<div
+  key={p.id}
+  className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 hover:bg-slate-50 transition"
+>
+  <div className="flex items-center gap-2.5">
+    <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${p.avatar}`}>
+      {p.name.split(" ").map(n => n[0]).join("")}
+    </span>
+    <div>
+      <span className="text-xs font-bold text-slate-800 block">{p.name}</span>
+      <span className="text-[10px] text-indigo-500 font-mono">@{p.username}</span>
+    </div>
+  </div>
+  {isConnected ? (
+    <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
+      Connected
+    </span>
+  ) : (
+    <button
+      onClick={() => handleImportInitiate(p)}
+      className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl cursor-pointer"
+    >
+      Connect +
+    </button>
+  )}
+</div>
+);
+})}
+</div>
+</div>
+)}
                     </div>
 
 
@@ -3791,24 +3738,62 @@ export default function App() {
                         ))}
                       </div>
 
-                      {/* Trigger to quick add wishes */}
-                      <div className="pt-6 border-t border-slate-150 mt-6 flex justify-end">
-                        <button
-                          onClick={() => {
-                            setSelectedFriendId("alex");
-                            setIsAddingWish(true);
-                            setRegistrySubTab("list");
-                          }}
-                          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-705 text-white rounded-xl text-xs font-black shadow transition-all flex items-center gap-2 cursor-pointer"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>Create desire listing on your registry</span>
-                        </button>
-                      </div>
+{/* Trigger to quick add wishes */}
+<div className="pt-6 border-t border-slate-150 mt-6">
+  {!isAddingWish ? (
+    <button
+      onClick={() => {
+        setIsAddingWish(true);
+      }}
+      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow transition-all flex items-center justify-center gap-2 cursor-pointer"
+    >
+      <Plus className="w-4 h-4" />
+      <span>Add to my wishlist</span>
+    </button>
+  ) : (
+    <form onSubmit={addWishlistItem} className="bg-slate-50 p-4 border border-slate-200 rounded-2xl space-y-3">
+      <div className="flex justify-between items-center">
+        <h5 className="text-[11px] font-bold text-slate-700 uppercase">New Wish Item</h5>
+        <button type="button" onClick={() => setIsAddingWish(false)} className="text-slate-400 hover:text-slate-600">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <input
+        type="text"
+        required
+        placeholder="Item name e.g. Nike Air Max"
+        value={newItemTitle}
+        onChange={(e) => setNewItemTitle(e.target.value)}
+        className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          type="text"
+          placeholder="Price e.g. $50"
+          value={newItemPrice}
+          onChange={(e) => setNewItemPrice(e.target.value)}
+          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
+        />
+        <input
+          type="text"
+          placeholder="Store URL (optional)"
+          value={newItemUrl}
+          onChange={(e) => setNewItemUrl(e.target.value)}
+          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
+        />
+      </div>
+      <button
+        type="submit"
+        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+      >
+        Save to Wishlist
+      </button>
+    </form>
+  )}
+</div>
                     </div>
                   </div>
                 )}
-
                 {registrySubTab === "widgets" && (
                   <div className="space-y-6 animate-fade-in" id="profile-subtab-widgets">
                     <div className="bg-white p-6 rounded-3xl border border-slate-200 text-left header-explain-widgets">
@@ -4163,15 +4148,6 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="space-y-2">
-                <div className="text-left">
-                  <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Profile Overview</span>
-                  <h4 className="text-lg md:text-xl font-black text-slate-900 mt-2">Everything about you, in one scrollable place</h4>
-                  <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-                    Your account details, wishlist items, widget preview, and trophy history are now stacked cleanly without nested tabs.
-                  </p>
-                </div>
-              </div>
 
               {false && (
                 <>
@@ -4893,74 +4869,141 @@ export default function App() {
                     </div>
 
                     {/* Grid items */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {friends.find(f => f.id === 'alex')?.wishlist.map(wish => (
-                        <div 
-                          key={wish.id}
-                          className="p-4 rounded-2xl border border-slate-150 bg-slate-50 flex justify-between items-start gap-4 transition-all hover:bg-slate-100/50"
-                        >
-                          <div className="flex-1">
-                            <span className="text-xs font-bold text-slate-850 block">{wish.title}</span>
-                            <div className="flex items-center gap-3 mt-1.5">
-                              <span className="text-xs font-black text-emerald-600 font-mono">{wish.price}</span>
-                              {wish.url && (
-                                <a 
-                                  href={wish.url} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer" 
-                                  className="text-[10px] text-indigo-600 font-bold hover:underline flex items-center gap-0.5"
-                                >
-                                  Store reference <ExternalLink className="w-2.5 h-2.5" />
-                                </a>
+                    {((friends.find(f => f.id === 'alex')?.wishlist?.length || 0) === 0) ? (
+                      <div className="text-center py-12 px-6 bg-slate-50 border border-dashed border-slate-200 rounded-[1.5rem] flex flex-col items-center justify-center space-y-3">
+                        <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center animate-pulse">
+                          <GiftIcon className="w-8 h-8" />
+                        </div>
+                        <div className="space-y-1">
+                          <h5 className="font-extrabold text-sm text-slate-800">Your Birthday Wishlist is Empty</h5>
+                          <p className="text-xs text-slate-500 max-w-sm">
+                            Add some gift items or desires so your companions know exactly how to celebrate and surprise you on your special day!
+                          </p>
+                        </div>
+                        {!isAddingWish && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedFriendId("alex");
+                              setIsAddingWish(true);
+                            }}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow transition-all cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Create First Wish</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {friends.find(f => f.id === 'alex')?.wishlist.map(wish => (
+                          <div 
+                            key={wish.id}
+                            className="p-4 rounded-2xl border border-slate-150 bg-slate-50 flex justify-between items-start gap-4 transition-all hover:bg-slate-100/50"
+                          >
+                            <div className="flex-1">
+                              <span className="text-xs font-bold text-slate-850 block">{wish.title}</span>
+                              <div className="flex items-center gap-3 mt-1.5">
+                                <span className="text-xs font-black text-emerald-600 font-mono">{wish.price}</span>
+                                {wish.url && (
+                                  <a 
+                                    href={wish.url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="text-[10px] text-indigo-600 font-bold hover:underline flex items-center gap-0.5"
+                                  >
+                                    Store reference <ExternalLink className="w-2.5 h-2.5" />
+                                  </a>
+                                )}
+                              </div>
+
+                              {wish.isClaimed && (
+                                <div className="mt-3 bg-teal-500/10 border border-teal-500/20 text-teal-850 text-[9.5px] font-bold p-1 px-2.5 rounded-lg w-fit">
+                                  🔒 Reserved in secret by {wish.claimedBy}
+                                </div>
                               )}
                             </div>
 
-                            {wish.isClaimed && (
-                              <div className="mt-3 bg-teal-500/10 border border-teal-500/20 text-teal-850 text-[9.5px] font-bold p-1 px-2.5 rounded-lg w-fit">
-                                🔒 Reserved in secret by {wish.claimedBy}
-                              </div>
-                            )}
+                            <div className="flex flex-col gap-1 items-end shrink-0">
+                              <button
+                                onClick={() => {
+                                  setSelectedFriendId("alex");
+                                  startEditingWishlistItem(wish);
+                                  setActiveSection("registry");
+                                }}
+                                className="p-1 px-2 text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 rounded block font-semibold cursor-pointer"
+                              >
+                                Modify Entry
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSelectedFriendId("alex");
+                                  deleteWishlistItem(wish.id);
+                                }}
+                                className="p-1 px-2 text-[10px] bg-rose-50 hover:bg-rose-100 text-rose-650 rounded block mt-1 cursor-pointer"
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </div>
+                        ))}
+                      </div>
+                    )}
 
-                          <div className="flex flex-col gap-1 items-end shrink-0">
-                            <button
-                              onClick={() => {
-                                setSelectedFriendId("alex");
-                                startEditingWishlistItem(wish);
-                                setActiveSection("registry");
-                              }}
-                              className="p-1 px-2 text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 rounded block font-semibold cursor-pointer"
-                            >
-                              Modify Entry
-                            </button>
-                            <button
-                              onClick={() => {
-                                setSelectedFriendId("alex");
-                                deleteWishlistItem(wish.id);
-                              }}
-                              className="p-1 px-2 text-[10px] bg-rose-50 hover:bg-rose-100 text-rose-650 rounded block mt-1 cursor-pointer"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Trigger to quick add wishes to Alexa self */}
-                    <div className="pt-6 border-t border-slate-150 mt-6 flex justify-end">
-                      <button
-                        onClick={() => {
-                          setSelectedFriendId("alex");
-                          setIsAddingWish(true);
-                          setActiveSection("registry");
-                        }}
-                        className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow transition-all flex items-center gap-2 cursor-pointer"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Create desire listing on your registry</span>
-                      </button>
-                    </div>
+{/* Trigger to quick add wishes to Alexa self */}
+<div className="pt-6 border-t border-slate-150 mt-6">
+  {!isAddingWish ? (
+    <button
+      onClick={() => {
+        setSelectedFriendId("alex");
+        setIsAddingWish(true);
+      }}
+      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow transition-all flex items-center justify-center gap-2 cursor-pointer"
+    >
+      <Plus className="w-4 h-4" />
+      <span>Add to my wishlist</span>
+    </button>
+  ) : (
+    <form onSubmit={addWishlistItem} className="bg-slate-50 p-4 border border-slate-200 rounded-2xl space-y-3">
+      <div className="flex justify-between items-center">
+        <h5 className="text-[11px] font-bold text-slate-700 uppercase">New Wish Item</h5>
+        <button type="button" onClick={() => setIsAddingWish(false)} className="text-slate-400 hover:text-slate-600">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <input
+        type="text"
+        required
+        placeholder="Item name e.g. Nike Air Max"
+        value={newItemTitle}
+        onChange={(e) => setNewItemTitle(e.target.value)}
+        className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          type="text"
+          placeholder="Price e.g. $50"
+          value={newItemPrice}
+          onChange={(e) => setNewItemPrice(e.target.value)}
+          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
+        />
+        <input
+          type="text"
+          placeholder="Store URL (optional)"
+          value={newItemUrl}
+          onChange={(e) => setNewItemUrl(e.target.value)}
+          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
+        />
+      </div>
+      <button
+        type="submit"
+        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+      >
+        Save to Wishlist
+      </button>
+    </form>
+  )}
+</div>
                   </div>
                 </div>
               )}
@@ -6150,25 +6193,12 @@ export default function App() {
             </div>
           )}
 
-          {/* ==================== SCREEN 9: CHIT-CHAT & WISHES COMPONENT ==================== */}
-          {activeSection === "chat" && (
-            <div className="text-left animate-[fadeIn_0.3s_ease-out]" id="view-chat-hull">
-              <ChatPage 
-                friends={friends}
-                toggleClaimWishlistItem={toggleClaimWishlistItem}
-                triggerToast={triggerToast}
-                mobileView={chatMobileView}
-                setMobileView={setChatMobileView}
-              />
-            </div>
-          )}
-
         </div>
 
       </main>
 
       {/* MOBILE STICKY BOTTOM NAVIGATION BAR */}
-      <nav className={`lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-slate-900 border-t border-slate-800 justify-around items-center px-1 z-40 shadow-2xl pb-6 pt-2 ${activeSection === "chat" && chatMobileView === "detail" ? "hidden" : "flex"}`} id="mobile-bottom-navigation">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-slate-900 border-t border-slate-800 flex justify-around items-center px-1 z-40 shadow-2xl pb-6 pt-2" id="mobile-bottom-navigation">
         <button
           onClick={() => {
             setActiveSection("dashboard");
@@ -6202,20 +6232,6 @@ export default function App() {
           )}
 
 
-        </button>
-
-        <button
-          onClick={() => {
-            setActiveSection("chat");
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }}
-          className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all cursor-pointer ${
-            activeSection === "chat" ? "text-indigo-400 font-black scale-105" : "text-slate-400 hover:text-slate-200"
-          }`}
-          title="Chat"
-        >
-          <MessageSquare className="w-4.5 h-4.5 mb-0.5" />
-          <span className="text-[9px] font-bold tracking-tight">Chat</span>
         </button>
 
         <button

@@ -75,6 +75,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
               setIsLoading(false);
               return;
             }
+            localStorage.setItem("birthday_authenticated_user", JSON.stringify(parsed));
             onLogin(parsed);
             triggerToast("Welcome back! 🎉", `Good to see you again, ${parsed.name}!`);
             return;
