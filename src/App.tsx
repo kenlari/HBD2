@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { INITIAL_FRIENDS, ALL_ACHIEVEMENTS_LIST } from "./data";
 import { Friend, WishlistItem, Achievement, GiftSuggestion, InAppNotification, SentGift } from "./types";
 import { WidgetSimulator } from "./components/WidgetSimulator";
 import { MOCK_EXTERNAL_PROFILES, MockProfile } from "./mockProfiles";
 import { QrScanner } from "./components/QrScanner";
+import { auth, db } from "./firebase";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { collection, doc, setDoc, deleteDoc, getDoc, onSnapshot } from "firebase/firestore";
 import { 
   Gift, 
   Calendar, 
@@ -146,6 +149,7 @@ const GIFT_INVENTORY: StoreGiftItem[] = [
 export default function App() {
   // --- AUTHENTICATED USER SESSION STATE ---
   const [userSession, setUserSession] = useState<{
+    uid: string;
     name: string;
     username: string;
     email: string;
@@ -157,52 +161,14 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [registryUsers, setRegistryUsers] = useState<any[]>([]);
+
   // Dynamic search input inside the Dashboard Executive Deck to discover others
   const [dashboardSearchQuery, setDashboardSearchQuery] = useState<string>("");
 
   // Friends list loaded from local storage or defaults
-  const [friends, setFriends] = useState<Friend[]>(() => {
-    const saved = localStorage.getItem("birthday_friends_list");
-    return saved ? JSON.parse(saved) : INITIAL_FRIENDS;
-  });
-
-  // Dynamic update of "alex" self-profile based on custom session
-  useEffect(() => {
-    if (userSession) {
-      setFriends(prev => {
-        const hasAlex = prev.find(f => f.id === "alex");
-        if (!hasAlex) return prev;
-        return prev.map(f => {
-          if (f.id === "alex") {
-            return {
-              ...f,
-              name: `${userSession.name} (You)`,
-              birthday: userSession.birthday,
-              avatar: userSession.avatar,
-              interests: userSession.interests
-            };
-          }
-          return f;
-        });
-      });
-    } else {
-      // Revert to Alex Patel representation if log out occurs
-      setFriends(prev => {
-        return prev.map(f => {
-          if (f.id === "alex") {
-            return {
-              ...f,
-              name: "Alex Patel (You)",
-              birthday: "1997-06-25",
-              avatar: "bg-teal-500",
-              interests: ["Photography", "Specialty Coffee", "Cyberpunk Novels", "Mechanic Keyboards"]
-            };
-          }
-          return f;
-        });
-      });
-    }
-  }, [userSession]);
+  const [friends, setFriends] = useState<Friend[]>([]);
 
   // --- SIGN IN FORM STATE CONTROLLERS ---
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(true);
@@ -506,6 +472,13 @@ export default function App() {
   // Selected friend in registry/AI picker
   const [selectedFriendId, setSelectedFriendId] = useState<string>("taylor");
   const [viewingBuddyProfile, setViewingBuddyProfile] = useState<boolean>(false);
+  const [revealPhone, setRevealPhone] = useState<boolean>(false);
+  const [revealWhatsApp, setRevealWhatsApp] = useState<boolean>(false);
+
+  useEffect(() => {
+    setRevealPhone(false);
+    setRevealWhatsApp(false);
+  }, [selectedFriendId]);
 
 
   // --- PREMIUM & FREEMIUM SYSTEM STATE VARIABLES ---
@@ -688,6 +661,87 @@ export default function App() {
   const [showRelationModal, setShowRelationModal] = useState<boolean>(false);
   const [pendingConnectProfile, setPendingConnectProfile] = useState<MockProfile | null>(null);
 
+  // Mobile device contacts synchronization states
+  const [contactsSynced, setContactsSynced] = useState<boolean>(() => {
+    const saved = localStorage.getItem("hbd_contacts_synced");
+    return saved === "true";
+  });
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  useEffect(() => {
+    localStorage.setItem("hbd_contacts_synced", contactsSynced ? "true" : "false");
+  }, [contactsSynced]);
+
+  // Automatically populate edit profile input fields when user session gets loaded/edited
+  useEffect(() => {
+    if (userSession) {
+      setSignInName(userSession.name || "");
+      setSignInUsername(userSession.username || "");
+      setSignInEmail(userSession.email || "");
+      setSignInPhone((userSession as any).phone || "+233241234567");
+      setSignInWhatsApp((userSession as any).whatsapp || "+233241234567");
+      setSignInBirthday(userSession.birthday || "1997-06-25");
+      setSignInAvatar(userSession.avatar || "bg-indigo-500");
+      setSignInInterests(userSession.interests || []);
+    }
+  }, [userSession]);
+
+  // Helper to retrieve all searchable accounts (Preset mocks + dynamic registered users)
+  const getSearchableProfiles = () => {
+    const saved = localStorage.getItem("hbd_all_accounts");
+    let registeredList: any[] = [];
+    if (saved) {
+      try {
+        registeredList = JSON.parse(saved);
+      } catch (e) {}
+    }
+    
+    // Convert registered accounts into standard MockProfile shape
+    const convertedRegistered = registeredList.map((acc: any, i: number) => ({
+      id: acc.username || `user-${acc.email || i}`,
+      name: acc.name,
+      username: acc.username,
+      phone: acc.phone || "+233241234567",
+      whatsapp: acc.whatsapp || "+233241234567",
+      email: acc.email || `${acc.username}@hbd.app`,
+      birthday: acc.birthday || "1997-06-25",
+      age: "28", // default fallback age representation
+      avatar: acc.avatar || "bg-indigo-500",
+      interests: acc.interests || [],
+      wishlistToPost: acc.wishlist || []
+    }));
+
+    // Exclude the currently logged in user handle to prevent self-addition
+    const currentUsername = userSession?.username || "";
+    const filteredMocks = MOCK_EXTERNAL_PROFILES.filter(p => p.username !== currentUsername);
+    const filteredRegistered = convertedRegistered.filter((p: any) => p.username !== currentUsername);
+
+    // Map filteredMocks to include required parameters for compatibility
+    const convertedMocks = filteredMocks.map(m => ({
+      id: m.id,
+      name: m.name,
+      username: m.username,
+      phone: m.phone,
+      whatsapp: m.phone,
+      email: `${m.username}@example.com`,
+      birthday: m.birthday,
+      age: m.age,
+      avatar: m.avatar,
+      interests: m.interests,
+      wishlistToPost: m.wishlistToPost
+    }));
+
+    // Merge registered handles first, then pack preset mocks to avoid username duplication
+    const merged = [...filteredRegistered];
+    convertedMocks.forEach(mock => {
+      if (!merged.some(m => m.username === mock.username)) {
+        merged.push(mock);
+      }
+    });
+
+    return merged;
+  };
+
   // Posted status map
   const [postedLists, setPostedLists] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem("birthday_posted_wishlists");
@@ -722,6 +776,242 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("birthday_posted_wishlists", JSON.stringify(postedLists));
   }, [postedLists]);
+
+  // Refs to control real-time synchronization diff operations and prevent feedback cycles
+  const isSyncingFromFirestoreRef = useRef<boolean>(false);
+  const prevFriendsRef = useRef<Friend[]>([]);
+  const prevGiftsRef = useRef<SentGift[]>([]);
+  const prevNotifsRef = useRef<InAppNotification[]>([]);
+
+  // Firebase Authentication State Listener Flow
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          const userDocSnap = await getDoc(doc(db, "users", firebaseUser.uid));
+          if (userDocSnap.exists()) {
+            const data = userDocSnap.data();
+            setUserSession(data as any);
+            if (data.walletBalance !== undefined) {
+              setWalletBalance(data.walletBalance);
+            }
+          } else {
+            // Document missing fallback initialization (prevents desync on cold-boots)
+            const fallback = {
+              uid: firebaseUser.uid,
+              name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+              username: firebaseUser.email?.split("@")[0].replace(/[^a-zA-Z0-9]/g, "_") || "user",
+              email: firebaseUser.email || "",
+              birthday: "1997-06-25",
+              avatar: "bg-indigo-500",
+              interests: []
+            };
+            setUserSession(fallback);
+          }
+        } catch (error) {
+          console.error("Firebase auth profile loader error", error);
+        }
+      } else {
+        setUserSession(null);
+      }
+      setAuthLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // System-wide registered discovery list listener (replacing LocalStorage arrays with cloud streams)
+  useEffect(() => {
+    if (!userSession?.uid) {
+      setRegistryUsers([]);
+      return;
+    }
+
+    const unsubscribe = onSnapshot(collection(db, "users"), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.uid !== userSession.uid && data.username) {
+          list.push(data);
+        }
+      });
+      setRegistryUsers(list);
+    });
+
+    return () => unsubscribe();
+  }, [userSession?.uid]);
+
+  // Firestore Real-Time Subcollection Subscriptions Flow
+  useEffect(() => {
+    if (!userSession?.uid) {
+      setFriends([]);
+      return;
+    }
+
+    const unsubFriends = onSnapshot(collection(db, "users", userSession.uid, "friends"), (snapshot) => {
+      isSyncingFromFirestoreRef.current = true;
+      const list: Friend[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as Friend);
+      });
+      setFriends(list);
+      prevFriendsRef.current = list;
+      setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
+    });
+
+    const unsubGifts = onSnapshot(collection(db, "users", userSession.uid, "sent_gifts"), (snapshot) => {
+      isSyncingFromFirestoreRef.current = true;
+      const list: SentGift[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as SentGift);
+      });
+      setSentGifts(list);
+      prevGiftsRef.current = list;
+      setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
+    });
+
+    const unsubNotifs = onSnapshot(collection(db, "users", userSession.uid, "notifications"), (snapshot) => {
+      isSyncingFromFirestoreRef.current = true;
+      const list: InAppNotification[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as InAppNotification);
+      });
+      setNotifications(list);
+      prevNotifsRef.current = list;
+      setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
+    });
+
+    const unsubUserDoc = onSnapshot(doc(db, "users", userSession.uid), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.walletBalance !== undefined && data.walletBalance !== walletBalance) {
+          isSyncingFromFirestoreRef.current = true;
+          setWalletBalance(data.walletBalance);
+          setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
+        }
+      }
+    });
+
+    return () => {
+      unsubFriends();
+      unsubGifts();
+      unsubNotifs();
+      unsubUserDoc();
+    };
+  }, [userSession?.uid]);
+
+  // State-to-Cloud Auto-Synchronizer Engine (Dirty State Interceptors)
+  useEffect(() => {
+    if (!userSession?.uid) return;
+    if (isSyncingFromFirestoreRef.current) return;
+
+    const syncWork = async () => {
+      const prevFriends = prevFriendsRef.current;
+      prevFriendsRef.current = friends;
+
+      // Handle Deleted Friends
+      for (const prevF of prevFriends) {
+        if (!friends.find(f => f.id === prevF.id)) {
+          try {
+            await deleteDoc(doc(db, "users", userSession.uid, "friends", prevF.id));
+          } catch (e) { console.error(e); }
+        }
+      }
+
+      // Handle New / Updated Friends
+      for (const friend of friends) {
+        const prevF = prevFriends.find(f => f.id === friend.id);
+        if (prevF && JSON.stringify(prevF) === JSON.stringify(friend)) continue;
+        
+        try {
+          await setDoc(doc(db, "users", userSession.uid, "friends", friend.id), friend, { merge: true });
+
+          const matchingRealUser = registryUsers.find(r => r.username === friend.id || r.uid === friend.id);
+          if (matchingRealUser) {
+            await setDoc(doc(db, "users", matchingRealUser.uid), {
+              wishlist: friend.wishlist || []
+            }, { merge: true });
+          }
+        } catch (e) { console.error(e); }
+      }
+    };
+
+    syncWork();
+  }, [friends, userSession?.uid, registryUsers]);
+
+  // Sync Sent Gift Logs to Cloud
+  useEffect(() => {
+    if (!userSession?.uid) return;
+    if (isSyncingFromFirestoreRef.current) return;
+
+    const syncGifts = async () => {
+      const prevGifts = prevGiftsRef.current;
+      prevGiftsRef.current = sentGifts;
+
+      for (const prevG of prevGifts) {
+        if (!sentGifts.find(g => g.id === prevG.id)) {
+          try {
+            await deleteDoc(doc(db, "users", userSession.uid, "sent_gifts", prevG.id));
+          } catch (e) { console.error(e); }
+        }
+      }
+
+      for (const gift of sentGifts) {
+        const prevG = prevGifts.find(g => g.id === gift.id);
+        if (prevG && JSON.stringify(prevG) === JSON.stringify(gift)) continue;
+        try {
+          await setDoc(doc(db, "users", userSession.uid, "sent_gifts", gift.id), gift, { merge: true });
+        } catch (e) { console.error(e); }
+      }
+    };
+
+    syncGifts();
+  }, [sentGifts, userSession?.uid]);
+
+  // Sync In-App Alert Notifications to Cloud
+  useEffect(() => {
+    if (!userSession?.uid) return;
+    if (isSyncingFromFirestoreRef.current) return;
+
+    const syncNotifs = async () => {
+      const prevNotifs = prevNotifsRef.current;
+      prevNotifsRef.current = notifications;
+
+      for (const prevN of prevNotifs) {
+        if (!notifications.find(n => n.id === prevN.id)) {
+          try {
+            await deleteDoc(doc(db, "users", userSession.uid, "notifications", prevN.id));
+          } catch (e) { console.error(e); }
+        }
+      }
+
+      for (const notif of notifications) {
+        const prevN = prevNotifs.find(n => n.id === notif.id);
+        if (prevN && JSON.stringify(prevN) === JSON.stringify(notif)) continue;
+        try {
+          await setDoc(doc(db, "users", userSession.uid, "notifications", notif.id), notif, { merge: true });
+        } catch (e) { console.error(e); }
+      }
+    };
+
+    syncNotifs();
+  }, [notifications, userSession?.uid]);
+
+  // Sync User Profile Preferences & Wallet balances
+  useEffect(() => {
+    if (!userSession?.uid) return;
+    if (isSyncingFromFirestoreRef.current) return;
+
+    const syncProfileMeta = async () => {
+      try {
+        await setDoc(doc(db, "users", userSession.uid), {
+          walletBalance: walletBalance
+        }, { merge: true });
+      } catch (e) { console.error(e); }
+    };
+
+    syncProfileMeta();
+  }, [walletBalance, userSession?.uid]);
 
 
   useEffect(() => {
@@ -1054,7 +1344,7 @@ export default function App() {
   };
 
   const handlePostWishlistAutomatically = (friendId: string) => {
-    const mockProf = MOCK_EXTERNAL_PROFILES.find(p => p.id === friendId);
+    const mockProf = getSearchableProfiles().find(p => p.id === friendId);
     if (!mockProf) return;
 
     setFriends(prev => {
@@ -1356,6 +1646,24 @@ export default function App() {
   }, 0);
   const unlockLevel = (friends.find(f => f.id === 'alex')?.achievements.length || 0) * 2 + 1;
 
+  if (authLoading) {
+    return (
+      <div className="w-full min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] bg-indigo-600/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute -bottom-[10%] -right-[10%] w-[50%] h-[50%] bg-teal-500/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="flex flex-col items-center gap-4 text-center select-none animate-pulse">
+          <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-3xl">
+            <Cake className="w-10 h-10 animate-spin text-indigo-400 opacity-80" style={{ animationDuration: "3s" }} />
+          </div>
+          <h1 className="text-xl font-extrabold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent font-mono tracking-wider">
+            BLOOM BIRTH
+          </h1>
+          <p className="text-xs text-slate-500 font-semibold">Establishing encrypted cloud workspace...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!userSession) {
     if (isLoggingIn) {
       return (
@@ -1417,8 +1725,8 @@ export default function App() {
         <div>
           {/* Workspace Branding Header */}
           <div className="p-6 border-b border-slate-800" id="sidebar-title-cell">
-            <div className="flex items-center gap-3">
-              <span className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-md cursor-pointer hover:bg-indigo-500 transition-colors">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <span className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-md cursor-pointer hover:bg-indigo-500 transition-colors shrink-0">
                 B
               </span>
               <div>
@@ -2114,14 +2422,14 @@ export default function App() {
                       className="space-y-3 pt-1"
                     >
                       <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                        Immediate Simulation Matches ({MOCK_EXTERNAL_PROFILES.filter(p => p.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.username.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.interests.some(i => i.toLowerCase().includes(dashboardSearchQuery.toLowerCase()))).length + friends.filter(f => f.id !== "alex" && f.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase())).length} accounts)
+                        Immediate Simulation Matches ({getSearchableProfiles().filter(p => p.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.username.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.interests.some(i => i.toLowerCase().includes(dashboardSearchQuery.toLowerCase()))).length + friends.filter(f => f.id !== "alex" && f.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase())).length} accounts)
                       </div>
 
                       {(() => {
                         const query = dashboardSearchQuery.toLowerCase().trim();
                         
                         // Filter external mock database profiles
-                        const matchExternal = MOCK_EXTERNAL_PROFILES.filter(p => 
+                        const matchExternal = getSearchableProfiles().filter(p => 
                           p.name.toLowerCase().includes(query) ||
                           p.username.toLowerCase().includes(query) ||
                           p.interests.some(i => i.toLowerCase().includes(query))
@@ -2950,15 +3258,60 @@ export default function App() {
 
                       {/* Case 1: Contacts Address Book */}
                       {connectMethod === "contacts" && (
-                        <div className="space-y-3">
-                          <p className="text-[10.5px] text-slate-500 font-medium">
-                            BloomBirth scanner has located <strong>{MOCK_EXTERNAL_PROFILES.length} core matches</strong> in your local device phonebook. Tap to sync profiles:
-                          </p>
+                        !contactsSynced ? (
+                          <div className="bg-slate-50 border border-slate-150 rounded-2xl p-6 text-center space-y-4 my-2">
+                            <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center mx-auto text-indigo-600">
+                              <Phone className="w-6 h-6" />
+                            </div>
+                            <div className="space-y-1">
+                              <h5 className="font-bold text-sm text-slate-800">Synchronize Address Book</h5>
+                              <p className="text-[11px] text-slate-500 leading-relaxed max-w-[240px] mx-auto">
+                                Sync your device contacts to find buddies, family, and colleagues on the registry.
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setIsSyncing(true);
+                                setTimeout(() => {
+                                  setContactsSynced(true);
+                                  setIsSyncing(false);
+                                  triggerToast("Address Book Synchronized 📱", `Loaded contacts from your active phonebook!`);
+                                }, 1500);
+                              }}
+                              disabled={isSyncing}
+                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                            >
+                              {isSyncing ? (
+                                <>
+                                  <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                  <span>Syncing Phonebook...</span>
+                                </>
+                              ) : (
+                                <span>Sync Mobile Contacts</span>
+                              )}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between animate-fade-in">
+                              <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+                                Contacts Scan ({getSearchableProfiles().length} matches)
+                              </p>
+                              <button
+                                onClick={() => {
+                                  setContactsSynced(false);
+                                  triggerToast("Sync Disconnected", "Local cached address book cleared.");
+                                }}
+                                className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 uppercase"
+                              >
+                                Disconnect Sync
+                              </button>
+                            </div>
 
-                          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                            {MOCK_EXTERNAL_PROFILES.map(p => {
-                              const isConnected = friends.some(f => f.id === p.id);
-                              
+                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                              {getSearchableProfiles().map(p => {
+                                const isConnected = friends.some(f => f.id === p.id || (f as any).username === p.username);
+                                
 return (
   <div
     key={p.id}
@@ -2979,7 +3332,7 @@ return (
       </span>
     ) : (
       <button
-        onClick={() => handleImportInitiate(p)}
+        onClick={() => handleImportInitiate(p as any)}
         className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl cursor-pointer"
       >
         Import +
@@ -2987,9 +3340,10 @@ return (
     )}
   </div>
 );
-                            })}
+                              })}
+                            </div>
                           </div>
-                        </div>
+                        )
                       )}
 
                       {/* Case 2: Username Lookup */}
@@ -3015,15 +3369,29 @@ return (
                           </div>
 
                           <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1 pt-1">
-                            {MOCK_EXTERNAL_PROFILES
-                              .filter(p => {
-                                if (!usernameSearch.trim()) return true; // show all handles by default to let user browse
-                                return p.username.toLowerCase().includes(usernameSearch.toLowerCase()) || p.name.toLowerCase().includes(usernameSearch.toLowerCase());
-                              })
-                              .map(p => {
-                                const isConnected = friends.some(f => f.id === p.id);
+                            {!usernameSearch.trim() ? (
+                              <div className="text-center py-6 text-xs text-slate-400 font-semibold">
+                                🔍 Type a username handle above to locate accounts.
+                              </div>
+                            ) : (
+                              (() => {
+                                const matched = getSearchableProfiles().filter(p => 
+                                  p.username.toLowerCase().includes(usernameSearch.toLowerCase()) || 
+                                  p.name.toLowerCase().includes(usernameSearch.toLowerCase())
+                                );
 
-                                return (
+                                if (matched.length === 0) {
+                                  return (
+                                    <div className="text-center py-6 text-xs text-slate-400 font-medium">
+                                      No matches found for &quot;{usernameSearch}&quot;
+                                    </div>
+                                  );
+                                }
+
+                                return matched.map(p => {
+                                  const isConnected = friends.some(f => f.id === p.id || (f as any).username === p.username);
+
+                                  return (
 <div
   key={p.id}
   className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 hover:bg-slate-50 transition"
@@ -3043,7 +3411,7 @@ return (
     </span>
   ) : (
     <button
-      onClick={() => handleImportInitiate(p)}
+      onClick={() => handleImportInitiate(p as any)}
       className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl cursor-pointer"
     >
       Connect +
@@ -3051,7 +3419,9 @@ return (
   )}
 </div>
 );
-})}
+                                });
+                              })()
+                            )}
 </div>
 </div>
 )}
@@ -3132,15 +3502,33 @@ return (
 
                           {/* Elegant coordinates tray */}
                           <div className="flex flex-wrap items-center gap-1.5 mt-2.5 text-left">
-                            <div className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-lg px-2 py-1 flex items-center gap-1 text-[10.5px] font-semibold text-slate-700">
-                              <Phone className="w-3 h-3 text-blue-500" />
+                            <div className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-[10.5px] font-semibold text-slate-700">
+                              <Phone className="w-3.5 h-3.5 text-blue-500 shrink-0" />
                               <span className="text-slate-400 font-medium">Phone:</span>
-                              <span className="font-mono text-slate-800">{selectedFriend.phone || "+233241234567"}</span>
+                              {revealPhone ? (
+                                <span className="font-mono text-slate-850 animate-fade-in">{selectedFriend.phone || "+233241234567"}</span>
+                              ) : (
+                                <button
+                                  onClick={() => setRevealPhone(true)}
+                                  className="text-[10px] text-indigo-600 hover:text-indigo-800 font-extrabold hover:underline cursor-pointer flex items-center gap-0.5"
+                                >
+                                  Reveal Number
+                                </button>
+                              )}
                             </div>
-                            <div className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-lg px-2 py-1 flex items-center gap-1 text-[10.5px] font-semibold text-slate-700">
-                              <MessageSquare className="w-3 h-3 text-emerald-500" />
+                            <div className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-[10.5px] font-semibold text-slate-700">
+                              <MessageSquare className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                               <span className="text-slate-400 font-medium">WhatsApp:</span>
-                              <span className="font-mono text-slate-800">{selectedFriend.whatsapp || "+233241234567"}</span>
+                              {revealWhatsApp ? (
+                                <span className="font-mono text-slate-850 animate-fade-in">{selectedFriend.whatsapp || "+233241234567"}</span>
+                              ) : (
+                                <button
+                                  onClick={() => setRevealWhatsApp(true)}
+                                  className="text-[10px] text-emerald-600 hover:text-emerald-800 font-extrabold hover:underline cursor-pointer flex items-center gap-0.5"
+                                >
+                                  Reveal Number
+                                </button>
+                              )}
                             </div>
                             <div className="bg-amber-50/50 hover:bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 flex items-center gap-1 text-[10.5px] font-semibold">
                               <span className="text-amber-600 font-bold">Snapchat:</span>
@@ -4613,6 +5001,7 @@ return (
                           return;
                         }
                         const sessionObj = {
+                          uid: userSession?.uid || "",
                           name: signInName.trim(),
                           username: signInUsername.trim().replace(/^@/, ""),
                           email: signInEmail.trim(),
@@ -4620,7 +5009,7 @@ return (
                           whatsapp: signInWhatsApp.trim(),
                           birthday: signInBirthday || "1997-06-25",
                           avatar: signInAvatar || "bg-indigo-600",
-                          interests: signInInterests
+                          interests: signInInterests,
                         };
                         localStorage.setItem("birthday_authenticated_user", JSON.stringify(sessionObj));
                         // Save to multi-account registry
@@ -4628,6 +5017,17 @@ return (
                         const accountsArray = existingAccounts ? JSON.parse(existingAccounts) : [];
                         const filteredAccounts = accountsArray.filter((a: any) => a.email !== sessionObj.email);
                         localStorage.setItem("hbd_all_accounts", JSON.stringify([...filteredAccounts, sessionObj]));
+                        
+                        // Write to Firestore as single source of truth
+                        (async () => {
+                          try {
+                            const { doc, setDoc } = await import("firebase/firestore");
+                            await setDoc(doc(db, "users", sessionObj.uid), sessionObj, { merge: true });
+                          } catch (e) {
+                            console.error(e);
+                          }
+                        })();
+
                         setUserSession(sessionObj);
                         triggerToast("Session Restructured", `Your active workspace handle is synced to @${sessionObj.username}!`);
                         appendLog(`🔐 Session Updated: Handle configured to @${sessionObj.username}.`);
@@ -5206,11 +5606,17 @@ return (
                     <div className="border-t border-slate-200 pt-4 space-y-3">
                       <button
                         type="button"
-                        onClick={() => {
-                          localStorage.removeItem("birthday_authenticated_user");
-                          setUserSession(null);
-                          setIsProfileSettingsOpen(false);
-                          triggerToast("Logged Out", "Your profile session has been signed out.");
+                        onClick={async () => {
+                          try {
+                            await signOut(auth);
+                            localStorage.removeItem("birthday_authenticated_user");
+                            setUserSession(null);
+                            setIsProfileSettingsOpen(false);
+                            triggerToast("Logged Out", "Your profile session has been signed out.");
+                          } catch (e) {
+                            console.error("SignOut error", e);
+                            triggerToast("Sign Out Failed ❌", "Please try again.");
+                          }
                         }}
                         className="w-full bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-2xl font-black text-sm transition"
                       >

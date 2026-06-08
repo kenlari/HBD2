@@ -1,6 +1,9 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sparkles, X, Mail, Lock, Eye, EyeOff, Cake } from "lucide-react";
+import { auth, db } from "../firebase";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 
 // ─────────────────────────────────────────────
 // LoginPage — drop this into your src/components/ folder
@@ -9,6 +12,7 @@ import { Sparkles, X, Mail, Lock, Eye, EyeOff, Cake } from "lucide-react";
 // onGoToSignUp() → switch back to the registration form
 // ─────────────────────────────────────────────
 interface LoginSession {
+  uid: string;
   name: string;
   username: string;
   email: string;
@@ -31,7 +35,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
       triggerToast("Missing Fields ⚠️", "Please enter your email and password.");
@@ -39,54 +43,50 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
     }
     setIsLoading(true);
 
-    // Simulate a short auth delay, then check localStorage for saved user
-    setTimeout(() => {
-      const saved = localStorage.getItem("birthday_authenticated_user");
-      const allAccounts = localStorage.getItem("hbd_all_accounts");
+    try {
+      // 1. Sign in with Firebase Authentication
+      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password.trim());
+      const firebaseUser = userCredential.user;
 
-      // Check all accounts array first
-      if (allAccounts) {
-        try {
-          const accounts = JSON.parse(allAccounts);
-          const match = accounts.find((a: any) =>
-            a.email.toLowerCase() === email.trim().toLowerCase()
-          );
-          if (match) {
-            if (match.password && match.password !== password) {
-              triggerToast("Wrong Password ❌", "Incorrect password. Please try again.");
-              setIsLoading(false);
-              return;
-            }
-            localStorage.setItem("birthday_authenticated_user", JSON.stringify(match));
-            onLogin(match);
-            triggerToast("Welcome back! 🎉", `Good to see you again, ${match.name}!`);
-            return;
-          }
-        } catch {}
+      // 2. Fetch the corresponding profile schema document from Firestore
+      const userDocRef = doc(db, "users", firebaseUser.uid);
+      const userDocSnap = await getDoc(userDocRef);
+
+      if (userDocSnap.exists()) {
+        const profile = userDocSnap.data() as LoginSession;
+        // Keep localized state in local storage as fallback/cache if helpful
+        localStorage.setItem("birthday_authenticated_user", JSON.stringify(profile));
+        
+        onLogin(profile);
+        triggerToast("Welcome back! 🎉", `Good to see you again, ${profile.name}!`);
+      } else {
+        // If Auth exists but document shape is missing, formulate it dynamically from user session
+        const fallbackProfile: LoginSession = {
+          uid: firebaseUser.uid,
+          name: firebaseUser.displayName || email.split("@")[0],
+          username: email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "_"),
+          email: firebaseUser.email || email,
+          birthday: "1997-06-25",
+          avatar: "bg-indigo-500",
+          interests: ["Photography", "Specialty Coffee"]
+        };
+        onLogin(fallbackProfile);
+        triggerToast("First Boot 🎉", `Creating profile workspace container, ${fallbackProfile.name}!`);
       }
-
-      // Fallback to single saved account
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed.email.toLowerCase() === email.trim().toLowerCase()) {
-            if (parsed.password && parsed.password !== password) {
-              triggerToast("Wrong Password ❌", "Incorrect password. Please try again.");
-              setIsLoading(false);
-              return;
-            }
-            localStorage.setItem("birthday_authenticated_user", JSON.stringify(parsed));
-            onLogin(parsed);
-            triggerToast("Welcome back! 🎉", `Good to see you again, ${parsed.name}!`);
-            return;
-          }
-        } catch {}
+    } catch (error: any) {
+      console.error("Firebase Login Error: ", error);
+      let errorMsg = "Something went wrong. Please check your credentials.";
+      if (error.code === "auth/invalid-credential" || error.code === "auth/user-not-found" || error.code === "auth/wrong-password") {
+        errorMsg = "Incorrect email or password. Please try again.";
+      } else if (error.code === "auth/invalid-email") {
+        errorMsg = "The email address is invalid.";
       }
-
-      triggerToast("No Account Found 🔍", "Email not found. Please create an account first.");
+      triggerToast("Sign In Failed ❌", errorMsg);
+    } finally {
       setIsLoading(false);
-    }, 900);
+    }
   };
+
 
   return (
     <div className="w-full min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">

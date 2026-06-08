@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "user": {
+      "title": "User Profile",
+      "description": "User accounts representing registered members with profiles and wishlists.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "birthday": { "type": "string" },
+        "phone": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "avatar": { "type": "string" },
+        "interests": { "type": "array" },
+        "walletBalance": { "type": "number" },
+        "wishlist": { "type": "array" },
+        "achievements": { "type": "array" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "username", "email", "birthday"]
+    },
+    "friend": {
+      "title": "Friend Buddy",
+      "description": "Friends or companions of the user, containing customized relationship traits.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "birthday": { "type": "string" },
+        "interests": { "type": "array" },
+        "avatar": { "type": "string" },
+        "relationship": { "type": "string" },
+        "age": { "type": "string" },
+        "phone": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "email": { "type": "string" },
+        "snapchat": { "type": "string" },
+        "connectedBack": { "type": "boolean" },
+        "wishlist": { "type": "array" },
+        "achievements": { "type": "array" }
+      },
+      "required": ["id", "name", "birthday"]
+    },
+    "sent_gift": {
+      "title": "Sent Gift Record",
+      "description": "Historical ledger of ordered, scheduled, and delivered presents.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "friendId": { "type": "string" },
+        "friendName": { "type": "string" },
+        "giftType": { "type": "string" },
+        "giftName": { "type": "string" },
+        "price": { "type": "string" },
+        "status": { "type": "string" },
+        "message": { "type": "string" },
+        "dateSent": { "type": "string" },
+        "revealDate": { "type": "string" }
+      },
+      "required": ["id", "friendId", "giftName"]
+    },
+    "notification": {
+      "title": "Notification",
+      "description": "In-app alerts detailing posted registries or system reminders.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "friendId": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["id", "type", "title", "message"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": { "$ref": "#/entities/user" },
+      "description": "Master list of all registered member accounts and profiles."
+    },
+    "users/{userId}/friends": {
+      "schema": { "$ref": "#/entities/friend" },
+      "description": "The specific contacts, friends, and buddy registries added by a user."
+    },
+    "users/{userId}/sent_gifts": {
+      "schema": { "$ref": "#/entities/sent_gift" },
+      "description": "Gift transactions and delivery schedule records for a user."
+    },
+    "users/{userId}/notifications": {
+      "schema": { "$ref": "#/entities/notification" },
+      "description": "Active in-app system or friend activity alerts for the user."
+    }
+  }
+}
