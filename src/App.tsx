@@ -1554,7 +1554,7 @@ export default function App() {
       </aside>
 
       {/* MAIN CONTAINER WORKSPACE */}
-      <main className="flex-1 flex flex-col min-w-0 pb-20 lg:pb-0 lg:max-w-[1100px] lg:mx-auto" id="main-canvas-wrapper">
+      <main className="flex-1 flex flex-col min-w-0 pb-28 lg:pb-0 lg:max-w-[1100px] lg:mx-auto" id="main-canvas-wrapper">
         
         {/* TOP STATUS BAR ROW */}
         <header className={`bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-4 justify-between items-start lg:items-center gap-4 z-10 text-left relative ${activeSection === "dashboard" ? "flex flex-col lg:flex-row" : "hidden"}`} id="main-workspace-header">
@@ -2740,7 +2740,7 @@ export default function App() {
 
               {/* Universal Buddies Navigation Bar */}
 
-              <div className="flex bg-slate-200/80 p-1.5 rounded-2xl w-full border border-slate-300/40 shadow-xs gap-1" id="registry-segmented-tabs">
+             <div className="flex bg-slate-200/80 p-1.5 rounded-2xl w-full border border-slate-300/40 shadow-xs gap-1" id="registry-segmented-tabs">
 <button
   type="button"
   onClick={() => setRegistrySubTab("list")}
@@ -2782,6 +2782,7 @@ export default function App() {
     </span>
   )}
 </button>
+
               </div>
 
               {/* Dynamic sections based on selected subtab */}
@@ -2796,7 +2797,7 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-4"
                   >
-                    <div className="space-y-3">                   
+                    <div className="space-y-3">                     
                       {/* Search Bar */}
                       <div className="relative mb-4">
                         <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
@@ -2838,7 +2839,6 @@ export default function App() {
                           Add Custom Buddy +
                         </button>
                       </div>
-
                       <div className="space-y-2">
                         {getFilteredFriends().length === 0 ? (
                           <div className="py-8 text-center text-slate-400">
@@ -3113,7 +3113,7 @@ export default function App() {
 
                   </motion.div>
                 )}
-{/* --- TAB C: FRIEND REQUESTS --- */}
+                {/* --- TAB C: FRIEND REQUESTS --- */}
 {registrySubTab === "requests" && (
   <motion.div
     initial={{ opacity: 0, y: 10 }}
@@ -6168,7 +6168,7 @@ export default function App() {
       </main>
 
       {/* MOBILE STICKY BOTTOM NAVIGATION BAR */}
-      <nav className={`lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-slate-900 border-t border-slate-800 justify-around items-center px-1 z-40 shadow-2xl pb-2.5 pt-1 ${activeSection === "chat" && chatMobileView === "detail" ? "hidden" : "flex"}`} id="mobile-bottom-navigation">
+      <nav className={`lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-slate-900 border-t border-slate-800 justify-around items-center px-1 z-40 shadow-2xl pb-6 pt-2 ${activeSection === "chat" && chatMobileView === "detail" ? "hidden" : "flex"}`} id="mobile-bottom-navigation">
         <button
           onClick={() => {
             setActiveSection("dashboard");
