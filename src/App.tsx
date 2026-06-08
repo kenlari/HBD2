@@ -2422,7 +2422,7 @@ export default function App() {
                       className="space-y-3 pt-1"
                     >
                       <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                        Immediate Simulation Matches ({getSearchableProfiles().filter(p => p.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.username.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.interests.some(i => i.toLowerCase().includes(dashboardSearchQuery.toLowerCase()))).length + friends.filter(f => f.id !== "alex" && f.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase())).length} accounts)
+                        Immediate Simulation Matches ({getSearchableProfiles().filter(p => p.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.username.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.interests.some((i:string) => i.toLowerCase().includes(dashboardSearchQuery.toLowerCase()))).length + friends.filter(f => f.id !== "alex" && f.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase())).length} accounts)
                       </div>
 
                       {(() => {
@@ -2432,14 +2432,14 @@ export default function App() {
                         const matchExternal = getSearchableProfiles().filter(p => 
                           p.name.toLowerCase().includes(query) ||
                           p.username.toLowerCase().includes(query) ||
-                          p.interests.some(i => i.toLowerCase().includes(query))
+                          p.interests.some((i:string) => i.toLowerCase().includes(query))
                         );
 
                         // Filter existing circle friends (excluding self)
                         const matchCircle = friends.filter(f => 
                           f.id !== "alex" && (
                             f.name.toLowerCase().includes(query) ||
-                            f.interests.some(i => i.toLowerCase().includes(query))
+                            f.interests.some((i:string) => i.toLowerCase().includes(query))
                           )
                         );
 
@@ -2510,7 +2510,7 @@ export default function App() {
                                     Discoverable 🌐
                                   </div>
                                   <div className={`w-9 h-9 rounded-xl ${ext.avatar} text-white font-serif font-black flex items-center justify-center shrink-0`}>
-                                    {ext.name.split(" ").map(n => n[0]).slice(0,2).join("")}
+                                    {ext.name.split(" ").map((n: string) => n[0] || "").slice(0,2).join("")}
                                   </div>
                                   <div className="min-w-0 flex-1 flex flex-col justify-between h-full">
                                     <div>
@@ -2520,7 +2520,7 @@ export default function App() {
                                     
                                     {/* Hobbies list */}
                                     <div className="flex flex-wrap gap-1 mt-1.5 leading-none">
-                                      {ext.interests.slice(0, 3).map(interest => (
+                                      {ext.interests.slice(0, 3).map((interest:string) => (
                                         <span key={interest} className="text-[9px] px-1.5 py-0.5 bg-indigo-50 text-indigo-500 rounded font-extrabold">
                                           #{interest}
                                         </span>
@@ -3319,7 +3319,7 @@ return (
   >
     <div className="flex items-center gap-2.5">
       <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${p.avatar}`}>
-        {p.name.split(" ").map(n => n[0]).join("")}
+        {p.name.split(" ").map((n: string) => n[0] || "").join("")}
       </span>
       <div>
         <span className="text-xs font-bold text-slate-800 block">{p.name}</span>
@@ -3398,7 +3398,7 @@ return (
 >
   <div className="flex items-center gap-2.5">
     <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${p.avatar}`}>
-      {p.name.split(" ").map(n => n[0]).join("")}
+      {p.name.split(" ").map((n: string) => n[0] || "").join("")}
     </span>
     <div>
       <span className="text-xs font-bold text-slate-800 block">{p.name}</span>
