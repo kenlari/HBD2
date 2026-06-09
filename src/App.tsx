@@ -1634,7 +1634,7 @@ export default function App() {
 
   const sortedUpcoming = getUpcomingSorted();
   const nextTarget = sortedUpcoming.find((f) => f.id !== "alex") || sortedUpcoming[0];
-  const nextTargetDays = calculateDaysRemaining(nextTarget.birthday);
+  const nextTargetDays = nextTarget ? calculateDaysRemaining(nextTarget.birthday) : 0;
 
   // Statistics summaries for executive deck
   const totalBuddiesCount = friends.filter(f => f.id !== "alex").length;
