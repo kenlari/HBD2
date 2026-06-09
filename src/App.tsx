@@ -1633,7 +1633,7 @@ export default function App() {
   };
 
   const sortedUpcoming = getUpcomingSorted();
-  git add . && git commit -m "Fix nextTarget crash with empty friends list" && git push
+  const nextTarget = sortedUpcoming.find((f) => f.id !== "alex") || sortedUpcoming[0] || { id: "", name: "No buddies yet", birthday: "2026-01-01", relationship: "", age: "0", avatar: "bg-slate-400", wishlist: [], achievements: [], interests: [] };
   const nextTargetDays = nextTarget ? calculateDaysRemaining(nextTarget.birthday) : 0;
 
   // Statistics summaries for executive deck
