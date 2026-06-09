@@ -6,7 +6,7 @@ import {
   Mail, ShieldCheck
 } from "lucide-react";
 import { auth, db } from "../firebase";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -23,6 +23,9 @@ interface SignUpSession {
   phone: string;
   whatsapp: string;
   password?: string;
+  phoneNumber?: string;
+  countryCode?: string;
+  currency?: string;
 }
 
 interface SignUpFlowProps {
@@ -35,6 +38,13 @@ interface SignUpFlowProps {
 // ─────────────────────────────────────────────────────────────────────────────
 // Data
 // ─────────────────────────────────────────────────────────────────────────────
+const COUNTRIES = [
+  { code: 'GH', name: 'Ghana', dialCode: '+233', currency: 'GHS' },
+  { code: 'NG', name: 'Nigeria', dialCode: '+234', currency: 'NGN' },
+  { code: 'US', name: 'United States', dialCode: '+1', currency: 'USD' },
+  { code: 'GB', name: 'United Kingdom', dialCode: '+44', currency: 'GBP' }
+];
+
 const INTEREST_OPTIONS = [
   { label: "Photography", emoji: "📸" },
   { label: "Specialty Coffee", emoji: "☕" },
@@ -67,7 +77,7 @@ const AVATAR_COLORS = [
   { bg: "bg-orange-500", hex: "#f97316", name: "Orange" },
 ];
 
-const TOTAL_STEPS = 9;
+const TOTAL_STEPS = 7;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step indicator
@@ -101,9 +111,6 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
-  const [generatedCode, setGeneratedCode] = useState("");
-  const [inputCodeError, setInputCodeError] = useState("");
   const [birthday, setBirthday] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -111,6 +118,8 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   const [whatsapp, setWhatsapp] = useState("+233");
   const [avatar, setAvatar] = useState("bg-indigo-500");
   const [interests, setInterests] = useState<string[]>([]);
+  const [selectedCountryCode, setSelectedCountryCode] = useState("GH");
+  const [rawPhone, setRawPhone] = useState("");
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -129,23 +138,25 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
     );
   };
 
-  const handleSendVerificationCode = () => {
-    // Generate a beautiful, readable 4-digit code
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    setGeneratedCode(code);
-    setInputCodeError("");
-    setVerificationCode("");
-    triggerToast("Verification Code Sent! ✉️", `Simulated code to ${email}: ${code}`);
-    go(3); // move to verification code input step
-  };
-
   const handleComplete = async () => {
     try {
       // 1. Create a real account in Firebase Authentication
       const userCredential = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password.trim());
       const uid = userCredential.user.uid;
 
-      // 2. Build the exact matching User entity schema (omitting raw passwords from database storage for security)
+      // 2. Send real Firebase verification email
+      try {
+        await sendEmailVerification(userCredential.user);
+        triggerToast("Verification email sent! ✉️", "Check your inbox.");
+      } catch (err) {
+        console.error("Firebase sendEmailVerification Error: ", err);
+      }
+
+      // 3. Build the exact matching User entity schema (omitting raw passwords from database storage for security)
+      const selectedCountry = COUNTRIES.find(c => c.code === selectedCountryCode) || COUNTRIES[0];
+      const cleanPhoneDigits = rawPhone.replace(/\D/g, '').replace(/^0+/, '');
+      const formattedPhone = `${selectedCountry.dialCode}${cleanPhoneDigits}`;
+
       const session: SignUpSession = {
         uid,
         name: name.trim(),
@@ -154,11 +165,14 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
         birthday,
         avatar,
         interests,
-        phone: phone.trim(),
-        whatsapp: whatsapp.trim() || phone.trim(),
+        phone: formattedPhone,
+        whatsapp: formattedPhone,
+        phoneNumber: formattedPhone,
+        countryCode: selectedCountry.code,
+        currency: selectedCountry.currency,
       };
 
-      // 3. Persist profile document in Firestore database
+      // 4. Persist profile document in Firestore database
       await setDoc(doc(db, "users", uid), {
         ...session,
         walletBalance: 0,
@@ -259,7 +273,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       onNext: () => go(2),
     },
 
-    // STEP 2 — Email Section (NEW!)
+    // STEP 2 — Email Section
     {
       icon: <Mail className="w-6 h-6" />,
       emoji: "✉️",
@@ -272,76 +286,18 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && validateEmail(email) && handleSendVerificationCode()}
+            onKeyDown={e => e.key === "Enter" && validateEmail(email) && go(3)}
             placeholder="name@example.com"
             className="w-full bg-slate-900 border border-white/10 text-white text-lg font-semibold rounded-2xl px-5 py-4 outline-none focus:border-indigo-400 focus:bg-slate-800 transition-all placeholder:text-white/20 font-mono"
           />
-          <p className="text-xs text-white/40 px-1">We will send a 4-digit code to complete security verification.</p>
+          <p className="text-xs text-white/40 px-1">We will send a secure verification email to complete sign up.</p>
         </div>
       ),
       canNext: validateEmail(email),
-      onNext: handleSendVerificationCode,
+      onNext: () => go(3),
     },
 
-    // STEP 3 — Email Verification Code (NEW!)
-    {
-      icon: <ShieldCheck className="w-6 h-6" />,
-      emoji: "🔑",
-      title: "Verify your email",
-      subtitle: `Enter the 4-digit code sent to ${email || "your address"}`,
-      content: (
-        <div className="space-y-4">
-          <div className="bg-indigo-950/60 border border-indigo-800/80 rounded-2xl p-4 text-center">
-            <span className="text-[10px] block text-indigo-300 font-extrabold uppercase tracking-widest mb-1.5">📬 Device Code Simulator</span>
-            <span className="text-2xl font-mono tracking-[0.25em] font-black text-emerald-400 select-all">{generatedCode || "1234"}</span>
-          </div>
-          <input
-            ref={inputRef}
-            type="text"
-            maxLength={4}
-            value={verificationCode}
-            onChange={e => {
-              const val = e.target.value.replace(/[^0-9]/g, "");
-              setVerificationCode(val);
-              if (val.length === 4) {
-                if (val === (generatedCode || "1234")) {
-                  setInputCodeError("");
-                } else {
-                  setInputCodeError("Incorrect verification code code. Try again.");
-                }
-              }
-            }}
-            onKeyDown={e => {
-              if (e.key === "Enter" && verificationCode === (generatedCode || "1234")) {
-                go(4);
-              }
-            }}
-            placeholder="• • • •"
-            className="w-full text-center bg-slate-900 border border-white/10 text-white text-2xl font-black rounded-2xl px-5 py-4 outline-none focus:border-indigo-400 focus:bg-slate-800 transition-all tracking-[0.4em]"
-          />
-          {inputCodeError && (
-            <p className="text-xs text-rose-400 font-bold text-center">{inputCodeError}</p>
-          )}
-          {verificationCode.length === 4 && verificationCode === (generatedCode || "1234") && (
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="flex justify-center items-center gap-1.5 text-emerald-400 text-xs font-bold"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Email verified successfully!</span>
-            </motion.div>
-          )}
-        </div>
-      ),
-      canNext: verificationCode === (generatedCode || "1234"),
-      onNext: () => {
-        triggerToast("Email Verified! 🎉", "Your workspace email is secured.");
-        go(4);
-      },
-    },
-
-    // STEP 4 — Birthday
+    // STEP 3 — Birthday
     {
       icon: <Cake className="w-6 h-6" />,
       emoji: "🎂",
@@ -369,6 +325,53 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
         </div>
       ),
       canNext: !!birthday,
+      onNext: () => go(4),
+    },
+
+    // STEP 4 — Country & Phone
+    {
+      icon: <Phone className="w-6 h-6" />,
+      emoji: "📞",
+      title: "Country & Phone",
+      subtitle: "Select your country and enter your mobile number.",
+      content: (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="block text-xs font-black uppercase tracking-wider text-white/40 px-1 text-left">Select Country</label>
+            <select
+              value={selectedCountryCode}
+              onChange={(e) => setSelectedCountryCode(e.target.value)}
+              className="w-full bg-slate-900 border border-white/10 text-white text-base font-semibold rounded-2xl px-4 py-3.5 outline-none focus:border-indigo-400 focus:bg-slate-800 transition-all cursor-pointer"
+            >
+              {COUNTRIES.map((c) => (
+                <option key={c.code} value={c.code} className="bg-slate-900 text-white">
+                  {c.name} ({c.dialCode})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-black uppercase tracking-wider text-white/40 px-1 text-left">Phone Number</label>
+            <div className="flex bg-slate-900 border border-white/10 rounded-2xl focus-within:border-indigo-400 focus-within:bg-slate-800 transition-all items-center overflow-hidden">
+              <span className="pl-4 pr-1 text-indigo-400 font-extrabold text-lg select-none">
+                {(COUNTRIES.find(c => c.code === selectedCountryCode) || COUNTRIES[0]).dialCode}
+              </span>
+              <input
+                ref={inputRef}
+                type="tel"
+                value={rawPhone}
+                onChange={e => setRawPhone(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={e => e.key === "Enter" && rawPhone.replace(/\D/g, "").length >= 7 && go(5)}
+                placeholder="054 123 4567"
+                className="w-full bg-transparent text-white text-lg font-semibold px-2 py-4 outline-none placeholder:text-white/20 font-mono"
+              />
+            </div>
+            <p className="text-[10px] text-white/40 px-1 text-left">Digits only. Leading zeros are formatted out automatically.</p>
+          </div>
+        </div>
+      ),
+      canNext: rawPhone.replace(/\D/g, "").length >= 7,
       onNext: () => go(5),
     },
 
@@ -412,7 +415,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
               />
             ))}
           </div>
-          <p className="text-xs text-white/40 px-1">
+          <p className="text-xs text-white/40 px-1 leading-normal text-left">
             {password.length === 0 ? "Start typing..." : password.length < 6 ? "Too short" : password.length < 10 ? "Good" : "Strong 💪"}
           </p>
         </div>
@@ -421,72 +424,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       onNext: () => go(6),
     },
 
-    // STEP 6 — Phone Number (UPDATED: Just one phone number input field, WhatsApp mirroring is automated)
-    {
-      icon: <Phone className="w-6 h-6" />,
-      emoji: "📱",
-      title: "Your phone number",
-      subtitle: "For WhatsApp birthday alerts and smart synchronization.",
-      content: (
-        <div className="space-y-3">
-          <input
-            ref={inputRef}
-            type="tel"
-            value={phone}
-            onChange={e => {
-              setPhone(e.target.value);
-              setWhatsapp(e.target.value); // Mirror to whatsapp implicitly
-            }}
-            onKeyDown={e => e.key === "Enter" && phone.trim().length >= 4 && go(7)}
-            placeholder="+233 24 123 4567"
-            className="w-full bg-slate-900 border border-white/10 text-white text-lg font-semibold rounded-2xl px-5 py-4 outline-none focus:border-indigo-400 focus:bg-slate-800 transition-all placeholder:text-white/20 font-mono"
-          />
-          <p className="text-xs text-white/40 px-1">We will send safe, beautiful birthday countdown alerts here.</p>
-        </div>
-      ),
-      canNext: phone.trim().length >= 4,
-      onNext: () => {
-        setWhatsapp(phone.trim());
-        go(7);
-      },
-    },
-
-    // STEP 7 — Avatar
-    {
-      icon: <Palette className="w-6 h-6" />,
-      emoji: "🎨",
-      title: "Pick your color",
-      subtitle: "This is your avatar accent. Choose your vibe.",
-      content: (
-        <div className="grid grid-cols-4 gap-3">
-          {AVATAR_COLORS.map(col => (
-            <button
-              key={col.bg}
-              type="button"
-              onClick={() => setAvatar(col.bg)}
-              className={`relative aspect-square rounded-2xl transition-all ${col.bg} ${
-                avatar === col.bg ? "scale-110 ring-4 ring-white/60 ring-offset-2 ring-offset-slate-950" : "opacity-70 hover:opacity-100 hover:scale-105"
-              }`}
-            >
-              {avatar === col.bg && (
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  className="absolute inset-0 flex items-center justify-center animate-pulse"
-                >
-                  <Check className="w-6 h-6 text-white stroke-[3]" />
-                </motion.div>
-              )}
-              <span className="absolute bottom-1.5 left-0 right-0 text-center text-[9px] text-white/70 font-bold">{col.name}</span>
-            </button>
-          ))}
-        </div>
-      ),
-      canNext: !!avatar,
-      onNext: () => go(8),
-    },
-
-    // STEP 8 — Interests
+    // STEP 6 — Interests
     {
       icon: <Heart className="w-6 h-6" />,
       emoji: "✨",
@@ -634,7 +572,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
               {username && <p className="text-[10px] font-mono text-indigo-400">@{username}</p>}
             </div>
             <div className="ml-auto flex items-center gap-1">
-              {[name, username, email, birthday, password, phone].filter(Boolean).map((_, i) => (
+              {[name, username, email, birthday, rawPhone, password].filter(Boolean).map((_, i) => (
                 <div key={i} className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               ))}
             </div>

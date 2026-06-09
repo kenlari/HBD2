@@ -17,7 +17,13 @@
         "walletBalance": { "type": "number" },
         "wishlist": { "type": "array" },
         "achievements": { "type": "array" },
-        "createdAt": { "type": "string" }
+        "createdAt": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "countryCode": { "type": "string" },
+        "currency": { "type": "string" },
+        "plan": { "type": "string" },
+        "planStatus": { "type": "string" },
+        "premiumActivatedAt": { "type": "string" }
       },
       "required": ["uid", "name", "username", "email", "birthday"]
     },

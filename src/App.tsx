@@ -53,7 +53,10 @@ import {
   Lock,
   EyeOff,
   Sun,
-  Moon
+  Moon,
+  Upload,
+  BookOpen,
+  Copy
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { LoginPage } from "./components/LoginPage";
@@ -279,6 +282,9 @@ export default function App() {
     const saved = localStorage.getItem("hbd_settings_sounds_enabled");
     return saved ? saved === "true" : true;
   });
+  const [reminderChime, setReminderChime] = useState<string>(() => {
+    return localStorage.getItem("hbd_settings_reminder_chime") || "default";
+  });
   const [userRegion, setUserRegion] = useState<"Ghana" | "Other Africa" | "USA/Western" | "Default">(() => {
     const saved = localStorage.getItem("hbd_pricing_region");
     if (saved) return saved as any;
@@ -395,6 +401,7 @@ export default function App() {
     localStorage.setItem("hbd_settings_auto_approve", String(autoApproveHandshakes));
     localStorage.setItem("hbd_settings_show_age", String(showAgeInProfile));
     localStorage.setItem("hbd_settings_sounds_enabled", String(soundEffectsEnabled));
+    localStorage.setItem("hbd_settings_reminder_chime", reminderChime);
     localStorage.setItem("hbd_settings_currency", globalCurrency);
     localStorage.setItem("hbd_settings_confetti", String(confettiOnBirthdays));
     localStorage.setItem("hbd_pricing_region", userRegion);
@@ -406,6 +413,7 @@ export default function App() {
     autoApproveHandshakes,
     showAgeInProfile,
     soundEffectsEnabled,
+    reminderChime,
     globalCurrency,
     confettiOnBirthdays,
     userRegion
@@ -564,6 +572,51 @@ export default function App() {
   // Bulk import textarea state
   const [bulkImportText, setBulkImportText] = useState<string>("");
 
+  // Paystack Billing & Upgrades
+  const [isPaymentLoading, setIsPaymentLoading] = useState<boolean>(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+
+  const handlePaymentUpgrade = async (targetPlan: "pro" | "business") => {
+    if (!userSession) {
+      triggerToast("Authentication Required", "Please sign in or create an account before billing.");
+      return;
+    }
+    
+    setIsPaymentLoading(true);
+    try {
+      const uId = userSession.uid || (userSession as any).userId || "";
+      const email = userSession.email || "";
+      const apiBase = (import.meta as any).env.VITE_API_URL || "";
+      
+      const response = await fetch(`${apiBase}/api/subscriptions/initialize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: uId,
+          email: email,
+          billingCycle: billingCycle, // "monthly" or "annual"
+          targetPlan,
+        }),
+      });
+      
+      const resData = await response.json();
+      
+      if (!response.ok || !resData.authorization_url) {
+        throw new Error(resData.error || "Failed to initialize premium invoice with Paystack gateway.");
+      }
+      
+      triggerToast("Redirecting to Paystack... 💳", "Preparing secure checkout window.");
+      window.location.href = resData.authorization_url;
+    } catch (err: any) {
+      console.error("Payment upgrade error:", err);
+      triggerToast("Gateway Error ✕", err.message || "Unable to reach payment authorization gateway.");
+    } finally {
+      setIsPaymentLoading(false);
+    }
+  };
+
   // Sub-states for adding or editing phone/snapchat handles for companions
   const [newFriendPhone, setNewFriendPhone] = useState<string>("");
   const [newFriendWhatsApp, setNewFriendWhatsApp] = useState<string>("");
@@ -594,6 +647,26 @@ export default function App() {
       localStorage.setItem("birthday_activity_logs", JSON.stringify(next));
       return next;
     });
+  };
+
+  // Helper to trigger selected pre-configured audio chimes
+  const playNotificationSound = (force = false) => {
+    if (!soundEffectsEnabled && !force) return;
+    const chimeUrls: Record<string, string> = {
+      default: "https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav", // Soft high ping
+      bell: "https://assets.mixkit.co/active_storage/sfx/911/911-84.wav", // Classic bell chime
+      marimba: "https://assets.mixkit.co/active_storage/sfx/1653/1653-84.wav", // Elegant marimba melody
+      digital: "https://assets.mixkit.co/active_storage/sfx/2568/2568-84.wav", // Modern digital synth chime
+      sweet: "https://assets.mixkit.co/active_storage/sfx/2018/2018-84.wav" // Gentle glockenspiel harmony
+    };
+    const audioUrl = chimeUrls[reminderChime] || chimeUrls.default;
+    try {
+      const audioObj = new Audio(audioUrl);
+      audioObj.volume = 0.5;
+      audioObj.play();
+    } catch (e) {
+      console.warn("Chime playback was blocked or failed", e);
+    }
   };
 
   // AI custom suggestion panel properties
@@ -667,10 +740,277 @@ export default function App() {
     return saved === "true";
   });
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [showContactSimulator, setShowContactSimulator] = useState<boolean>(false);
+  const [isDraggingContactFile, setIsDraggingContactFile] = useState<boolean>(false);
+
+  interface SyncedContact {
+    id: string;
+    name: string;
+    phone?: string;
+    email?: string;
+    birthday?: string;
+    avatar: string;
+    source: string;
+  }
+
+  const [syncedContacts, setSyncedContacts] = useState<SyncedContact[]>(() => {
+    const saved = localStorage.getItem("hbd_synced_contacts_list");
+    return saved ? JSON.parse(saved) : [];
+  });
 
   useEffect(() => {
     localStorage.setItem("hbd_contacts_synced", contactsSynced ? "true" : "false");
   }, [contactsSynced]);
+
+  useEffect(() => {
+    localStorage.setItem("hbd_synced_contacts_list", JSON.stringify(syncedContacts));
+  }, [syncedContacts]);
+
+  const parseVCF = (text: string): { name: string; phone?: string; email?: string; birthday?: string; avatar: string }[] => {
+    const contacts: any[] = [];
+    const bgColors = ["bg-teal-500", "bg-emerald-500", "bg-indigo-500", "bg-purple-500", "bg-amber-500", "bg-rose-500", "bg-pink-500", "bg-orange-500"];
+    
+    // Split on BEGIN:VCARD and handle each card block
+    const cards = text.split("BEGIN:VCARD");
+    for (const card of cards) {
+      if (!card.trim()) continue;
+      let name = "";
+      let phone = "";
+      let email = "";
+      let birthday = "";
+
+      const lines = card.split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.toUpperCase().startsWith("FN:")) {
+          name = trimmed.substring(3).trim();
+        } else if (trimmed.toUpperCase().startsWith("N:") && !name) {
+          const parts = trimmed.substring(2).split(";");
+          const first = parts[1] || "";
+          const last = parts[0] || "";
+          name = `${first} ${last}`.trim();
+        } else if (trimmed.toUpperCase().startsWith("TEL")) {
+          const colonIdx = trimmed.indexOf(":");
+          if (colonIdx !== -1) {
+            phone = trimmed.substring(colonIdx + 1).trim();
+          }
+        } else if (trimmed.toUpperCase().startsWith("EMAIL")) {
+          const colonIdx = trimmed.indexOf(":");
+          if (colonIdx !== -1) {
+            email = trimmed.substring(colonIdx + 1).trim();
+          }
+        } else if (trimmed.toUpperCase().startsWith("BDAY")) {
+          const colonIdx = trimmed.indexOf(":");
+          if (colonIdx !== -1) {
+            let bdayVal = trimmed.substring(colonIdx + 1).trim().replace(/[^0-9-]/g, "");
+            if (bdayVal.length === 8 && !bdayVal.includes("-")) {
+              birthday = `${bdayVal.substring(0, 4)}-${bdayVal.substring(4, 6)}-${bdayVal.substring(6, 8)}`;
+            } else if (bdayVal.startsWith("--")) {
+              birthday = `1995-${bdayVal.substring(2)}`;
+            } else {
+              birthday = bdayVal;
+            }
+          }
+        }
+      }
+      
+      if (name) {
+        const avatar = bgColors[Math.floor(Math.random() * bgColors.length)];
+        contacts.push({ name, phone, email, birthday, avatar });
+      }
+    }
+    return contacts;
+  };
+
+  const parseCSV = (text: string): { name: string; phone?: string; email?: string; birthday?: string; avatar: string }[] => {
+    const contacts: any[] = [];
+    const bgColors = ["bg-teal-500", "bg-emerald-500", "bg-indigo-500", "bg-purple-500", "bg-amber-500", "bg-rose-500", "bg-pink-500", "bg-orange-500"];
+    
+    const lines = text.split(/\r?\n/).filter(line => line.trim());
+    if (lines.length < 2) return [];
+
+    const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/["']/g, ""));
+    const findIndex = (keywords: string[]) => {
+      return headers.findIndex(h => keywords.some(k => h.includes(k)));
+    };
+
+    const nameIdx = findIndex(["name", "display name", "first name", "fn"]);
+    const phoneIdx = findIndex(["phone", "tel", "mobile", "contact", "phone number"]);
+    const emailIdx = findIndex(["email", "mail", "email address"]);
+    const bdayIdx = findIndex(["birthday", "dob", "birth", "bday", "date of birth"]);
+
+    for (let i = 1; i < lines.length; i++) {
+      const row = lines[i].split(",").map(val => val.trim().replace(/["']/g, ""));
+      const name = nameIdx !== -1 && row[nameIdx] ? row[nameIdx] : "";
+      if (!name) continue;
+
+      const phone = phoneIdx !== -1 && row[phoneIdx] ? row[phoneIdx] : "";
+      const email = emailIdx !== -1 && row[emailIdx] ? row[emailIdx] : "";
+      let birthday = bdayIdx !== -1 && row[bdayIdx] ? row[bdayIdx] : "";
+
+      if (birthday) {
+        birthday = birthday.replace(/\//g, "-");
+        const parts = birthday.split("-");
+        if (parts.length === 3) {
+          let year = parts[0];
+          let month = parts[1];
+          let day = parts[2];
+          if (year.length !== 4 && day.length === 4) {
+            year = parts[2];
+            month = parts[0];
+            day = parts[1];
+          }
+          if (month.length === 1) month = "0" + month;
+          if (day.length === 1) day = "0" + day;
+          birthday = `${year}-${month}-${day}`;
+        }
+      }
+
+      const avatar = bgColors[Math.floor(Math.random() * bgColors.length)];
+      contacts.push({ name, phone, email, birthday, avatar });
+    }
+    return contacts;
+  };
+
+  const handleImportedContacts = (newContacts: any[]) => {
+    if (newContacts.length === 0) {
+      triggerToast("No Contacts Found", "We couldn't recognize contact names or valid headers in this sync action.");
+      return;
+    }
+    
+    setSyncedContacts(prev => {
+      const merged = [...prev];
+      let added = 0;
+      newContacts.forEach(nc => {
+        const exists = merged.some(mc => 
+          mc.name.toLowerCase().trim() === nc.name.toLowerCase().trim() ||
+          (nc.phone && mc.phone === nc.phone) ||
+          (nc.email && mc.email === nc.email)
+        );
+        if (!exists) {
+          merged.push({
+            id: nc.id || `contact-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            name: nc.name,
+            phone: nc.phone || "",
+            email: nc.email || "",
+            birthday: nc.birthday || "1997-11-21",
+            avatar: nc.avatar || "bg-indigo-500",
+            source: nc.source || "File Backup"
+          });
+          added++;
+        }
+      });
+      triggerToast(
+        "Contacts Synced 📱", 
+        `Address book synchronized. Successfully integrated ${added} new offline companion records.`
+      );
+      return merged;
+    });
+    setContactsSynced(true);
+  };
+
+  const handleContactFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) return;
+      
+      let parsed: any[] = [];
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      if (extension === 'vcf') {
+        parsed = parseVCF(text);
+      } else if (extension === 'csv') {
+        parsed = parseCSV(text);
+      } else {
+        triggerToast("Unsupported File", "Please export contacts into standard .csv or .vcf formats.");
+        return;
+      }
+      handleImportedContacts(parsed);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleWebContactPicker = async () => {
+    if (!("contacts" in navigator && "select" in (navigator as any).contacts)) {
+      triggerToast("Sandbox Simulation Mode ✨", "Secure browser Contacts interface was requested. Launching Picker Simulation!");
+      setShowContactSimulator(true);
+      return;
+    }
+
+    try {
+      setIsSyncing(true);
+      const props = ["name", "tel", "email"];
+      const opts = { multiple: true };
+      const selectedContacts = await (navigator as any).contacts.select(props, opts);
+      
+      const mapped = selectedContacts.map((c: any) => {
+        const name = c.name && c.name[0] ? c.name[0] : "Unnamed Contact";
+        const phone = c.tel && c.tel[0] ? c.tel[0] : "";
+        const email = c.email && c.email[0] ? c.email[0] : "";
+        
+        const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
+        const day = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
+        const month = months[Math.floor(Math.random() * months.length)];
+        const bday = `1997-${month}-${day}`;
+
+        const bgColors = ["bg-teal-500", "bg-emerald-500", "bg-indigo-500", "bg-purple-500", "bg-amber-500", "bg-rose-500"];
+        const randomBg = bgColors[Math.floor(Math.random() * bgColors.length)];
+
+        return {
+          name,
+          phone,
+          email,
+          birthday: bday,
+          avatar: randomBg,
+          source: "Device Address Book"
+        };
+      });
+
+      handleImportedContacts(mapped);
+    } catch (err: any) {
+      console.error("Web Contacts Picker failed: ", err);
+      if (err.name === "SecurityError" || err.message?.includes("iframe")) {
+        triggerToast("Sandbox Protocol Routing ✨", "Opening secure container simulation matching.");
+        setShowContactSimulator(true);
+      } else {
+        triggerToast("Sync Canceled", "Device sync process was dismissed.");
+      }
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleImportLocalContact = (sc: SyncedContact) => {
+    const bday = sc.birthday || "1997-11-21";
+    const nextId = sc.id;
+    
+    // Check Freemium tier constraints
+    const companionCount = friends.filter(f => f.id !== "alex").length;
+    if (accountType === "Free" && companionCount >= 5) {
+      setShowUpgradePromptModal(true);
+      triggerToast("Friend Limit Reached 👑", "Free account tier is capped at 5 additions. Upgrade for unlimited!");
+      return;
+    }
+
+    const newFriend: Friend = {
+      id: nextId,
+      name: sc.name,
+      birthday: bday,
+      relationship: "Contact Tracker",
+      age: "25",
+      interests: ["Baking", "Plants", "Photography"],
+      avatar: sc.avatar || "bg-indigo-500",
+      wishlist: [],
+      achievements: [],
+      phone: sc.phone || "+233241234567",
+      email: sc.email || "friend@example.com",
+      connectedBack: false
+    };
+
+    setFriends(prev => [...prev, newFriend]);
+    appendLog(`🎂 Imported Address Book Tracker: Scanned and integrated ${sc.name} as offline celebration companion.`);
+    triggerToast("Tracker Imported! 🎂", `${sc.name} added to your celebration dashboard circles.`);
+  };
 
   // Automatically populate edit profile input fields when user session gets loaded/edited
   useEffect(() => {
@@ -889,6 +1229,22 @@ export default function App() {
           setWalletBalance(data.walletBalance);
           setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
         }
+        // Real-time plan status synchronization
+        if (data.plan === "pro" && data.planStatus === "active") {
+          setAccountType("Pro");
+        } else if (data.plan === "business" && data.planStatus === "active") {
+          setAccountType("Business");
+        } else if (data.accountType) {
+          setAccountType(data.accountType);
+        }
+        // Merge deep updates into the user session state
+        setUserSession(prev => {
+          if (!prev) return data as any;
+          if (JSON.stringify(prev) !== JSON.stringify(data)) {
+            return { ...prev, ...data };
+          }
+          return prev;
+        });
       }
     });
 
@@ -2258,6 +2614,194 @@ export default function App() {
             </div>
           )}
 
+          {/* MODAL DIALOG POPUP: Interactive Address Book Simulator fallback */}
+          {showContactSimulator && (
+            <div className="fixed inset-0 bg-slate-900/65 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full border border-slate-150 shadow-2xl relative text-left flex flex-col max-h-[90vh]"
+                id="contact-simulator-modal"
+              >
+                <button
+                  onClick={() => setShowContactSimulator(false)}
+                  className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                <div className="flex items-center gap-3 mb-4 shrink-0">
+                  <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">Virtual Device Contacts Picker</h3>
+                    <p className="text-xs text-slate-500">Pick companions from your mock sim-phone status cache</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-600 mb-4 leading-relaxed shrink-0">
+                  Select which contacts you would like to synchronize from your phonebook address deck, or customize their parameters below:
+                </p>
+
+                {/* Simulated Custom Contact Creator Form */}
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4.5 mb-4 space-y-3 shrink-0">
+                  <span className="text-[10px] font-black uppercase text-indigo-800 tracking-wider block">Add Custom Simulated Contact</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <label className="block text-[9px] text-slate-500 font-semibold mb-1">Full Name</label>
+                      <input
+                        type="text"
+                        id="sim-new-name"
+                        placeholder="John Doe"
+                        className="w-full bg-white border border-slate-205 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] text-slate-500 font-semibold mb-1">Phone Number</label>
+                      <input
+                        type="text"
+                        id="sim-new-phone"
+                        placeholder="+233..."
+                        className="w-full bg-white border border-slate-205 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] text-slate-500 font-semibold mb-1">Birthday</label>
+                      <input
+                        type="date"
+                        id="sim-new-bday"
+                        className="w-full bg-white border border-slate-205 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <button
+                      onClick={() => {
+                        const nameEl = document.getElementById("sim-new-name") as HTMLInputElement;
+                        const phoneEl = document.getElementById("sim-new-phone") as HTMLInputElement;
+                        const bdayEl = document.getElementById("sim-new-bday") as HTMLInputElement;
+                        
+                        if (!nameEl?.value.trim()) {
+                          triggerToast("Missing Name", "Simulated contact must have a name.");
+                          return;
+                        }
+                        
+                        const newContact = {
+                          name: nameEl.value.trim(),
+                          phone: phoneEl?.value.trim() || "+233240001122",
+                          email: `${nameEl.value.trim().toLowerCase().replace(/\s+/g, "")}@example.com`,
+                          birthday: bdayEl?.value || "1997-11-21",
+                          avatar: "bg-teal-500",
+                          source: "Manual Sim"
+                        };
+                        
+                        handleImportedContacts([newContact]);
+                        setShowContactSimulator(false);
+                      }}
+                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] rounded-lg transition-all"
+                    >
+                      Insert & Sync
+                    </button>
+                  </div>
+                </div>
+
+                {/* Preset List */}
+                <div className="overflow-y-auto space-y-2 border border-slate-100 rounded-2xl p-2 bg-slate-50/50 mb-4 max-h-[250px]">
+                  {[
+                    { name: "Benjamin Quansah", phone: "+233246781234", email: "ben@example.com", birthday: "1994-11-12", avatar: "bg-indigo-500" },
+                    { name: "Eunice Mensah", phone: "+233551122334", email: "eunice.m@example.com", birthday: "1997-04-18", avatar: "bg-emerald-500" },
+                    { name: "Kofi Boateng", phone: "+233209876543", email: "kofi@example.com", birthday: "1996-03-02", avatar: "bg-amber-500" },
+                    { name: "Abena Pokua", phone: "+233271239876", email: "abena@hbd.app", birthday: "1999-08-21", avatar: "bg-teal-500" },
+                    { name: "Sena Tsikata", phone: "+233243110984", email: "sena@example.com", birthday: "1995-12-14", avatar: "bg-rose-500" },
+                    { name: "Sylvester Tetteh", phone: "+233544009988", email: "sly@example.com", birthday: "1998-07-06", avatar: "bg-pink-500" },
+                    { name: "Araba Attah", phone: "+233261234567", email: "araba.attah@example.com", birthday: "1997-01-30", avatar: "bg-purple-500" },
+                    { name: "Kwame Nkrumah Jr", phone: "+233241857390", email: "kwame.nk@example.com", birthday: "2000-09-21", avatar: "bg-orange-500" }
+                  ].map((c, i) => {
+                    const isSelected = syncedContacts.some(sc => sc.name === c.name || sc.phone === c.phone);
+                    return (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 shadow-3xs"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className={`w-8 h-8 rounded-lg text-[10px] text-white font-bold flex items-center justify-center ${c.avatar}`}>
+                            {c.name.split(" ").map(n => n[0] || "").join("")}
+                          </span>
+                          <div>
+                            <span className="text-xs font-bold text-slate-800 block">{c.name}</span>
+                            <span className="text-[10px] text-slate-400 block font-mono">{c.phone} &bull; {c.birthday}</span>
+                          </div>
+                        </div>
+                        {isSelected ? (
+                          <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
+                            Synced
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              handleImportedContacts([{
+                                name: c.name,
+                                phone: c.phone,
+                                email: c.email,
+                                birthday: c.birthday,
+                                avatar: c.avatar,
+                                source: "Address Book Sim"
+                              }]);
+                              setShowContactSimulator(false);
+                            }}
+                            className="text-[9px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1 rounded-md transition-all active:scale-95"
+                          >
+                            Sync Single
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Import All Preset Button */}
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      const presetsList = [
+                        { name: "Benjamin Quansah", phone: "+233246781234", email: "ben@example.com", birthday: "1994-11-12", avatar: "bg-indigo-500" },
+                        { name: "Eunice Mensah", phone: "+233551122334", email: "eunice.m@example.com", birthday: "1997-04-18", avatar: "bg-emerald-500" },
+                        { name: "Kofi Boateng", phone: "+233209876543", email: "kofi@example.com", birthday: "1996-03-02", avatar: "bg-amber-500" },
+                        { name: "Abena Pokua", phone: "+233271239876", email: "abena@hbd.app", birthday: "1999-08-21", avatar: "bg-teal-500" },
+                        { name: "Sena Tsikata", phone: "+233243110984", email: "sena@example.com", birthday: "1995-12-14", avatar: "bg-rose-500" },
+                        { name: "Sylvester Tetteh", phone: "+233544009988", email: "sly@example.com", birthday: "1998-07-06", avatar: "bg-pink-500" },
+                        { name: "Araba Attah", phone: "+233261234567", email: "araba.attah@example.com", birthday: "1997-01-30", avatar: "bg-purple-500" },
+                        { name: "Kwame Nkrumah Jr", phone: "+233241857390", email: "kwame.nk@example.com", birthday: "2000-09-21", avatar: "bg-orange-500" }
+                      ];
+                      const unselected = presetsList.filter(c => !syncedContacts.some(sc => sc.name === c.name));
+                      if (unselected.length === 0) {
+                        triggerToast("All Presets Synced", "All contacts are already imported into your synced address deck.");
+                        return;
+                      }
+                      const mapped = unselected.map(c => ({
+                        ...c,
+                        source: "Address Book Sim All"
+                      }));
+                      handleImportedContacts(mapped);
+                      setShowContactSimulator(false);
+                    }}
+                    className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all text-center active:scale-95"
+                  >
+                    Sync All Presets
+                  </button>
+                  <button
+                    onClick={() => setShowContactSimulator(false)}
+                    className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl transition-all"
+                  >
+                    Close
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
           {/* SLIDING RIGHT-SIDE NOTIFICATION DRAWER */}
           {showNotificationDrawer && (
             <div className="fixed inset-0 z-50 flex justify-end">
@@ -3259,88 +3803,270 @@ export default function App() {
                       {/* Case 1: Contacts Address Book */}
                       {connectMethod === "contacts" && (
                         !contactsSynced ? (
-                          <div className="bg-slate-50 border border-slate-150 rounded-2xl p-6 text-center space-y-4 my-2">
-                            <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center mx-auto text-indigo-600">
-                              <Phone className="w-6 h-6" />
-                            </div>
-                            <div className="space-y-1">
-                              <h5 className="font-bold text-sm text-slate-800">Synchronize Address Book</h5>
-                              <p className="text-[11px] text-slate-500 leading-relaxed max-w-[240px] mx-auto">
-                                Sync your device contacts to find buddies, family, and colleagues on the registry.
-                              </p>
-                            </div>
-                            <button
-                              onClick={() => {
-                                setIsSyncing(true);
-                                setTimeout(() => {
-                                  setContactsSynced(true);
-                                  setIsSyncing(false);
-                                  triggerToast("Address Book Synchronized 📱", `Loaded contacts from your active phonebook!`);
-                                }, 1500);
-                              }}
-                              disabled={isSyncing}
-                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm"
-                            >
-                              {isSyncing ? (
-                                <>
-                                  <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                                  <span>Syncing Phonebook...</span>
-                                </>
-                              ) : (
-                                <span>Sync Mobile Contacts</span>
-                              )}
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between animate-fade-in">
-                              <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-                                Contacts Scan ({getSearchableProfiles().length} matches)
-                              </p>
+                          <div className="space-y-4 my-2">
+                            <div className="bg-slate-50 border border-slate-150 rounded-2xl p-6 text-center space-y-4">
+                              <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center mx-auto text-indigo-600">
+                                <Phone className="w-6 h-6" />
+                              </div>
+                              <div className="space-y-1">
+                                <h5 className="font-bold text-sm text-slate-800">Synchronize Address Book</h5>
+                                <p className="text-[11px] text-slate-500 leading-relaxed max-w-[240px] mx-auto">
+                                  Sync your device contacts to find buddies, family, and colleagues on the registry.
+                                </p>
+                              </div>
                               <button
-                                onClick={() => {
-                                  setContactsSynced(false);
-                                  triggerToast("Sync Disconnected", "Local cached address book cleared.");
-                                }}
-                                className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 uppercase"
+                                onClick={handleWebContactPicker}
+                                disabled={isSyncing}
+                                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
                               >
-                                Disconnect Sync
+                                {isSyncing ? (
+                                  <>
+                                    <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                    <span>Syncing Phonebook...</span>
+                                  </>
+                                ) : (
+                                  <span>Sync Device Address Book</span>
+                                )}
                               </button>
                             </div>
 
-                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                              {getSearchableProfiles().map(p => {
-                                const isConnected = friends.some(f => f.id === p.id || (f as any).username === p.username);
-                                
-return (
-  <div
-    key={p.id}
-    className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 hover:bg-slate-50 transition"
-  >
-    <div className="flex items-center gap-2.5">
-      <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${p.avatar}`}>
-        {p.name.split(" ").map((n: string) => n[0] || "").join("")}
-      </span>
-      <div>
-        <span className="text-xs font-bold text-slate-800 block">{p.name}</span>
-        <span className="text-[10px] text-indigo-500 font-mono">@{p.username}</span>
-      </div>
-    </div>
-    {isConnected ? (
-      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
-        Connected
-      </span>
-    ) : (
-      <button
-        onClick={() => handleImportInitiate(p as any)}
-        className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl cursor-pointer"
-      >
-        Import +
-      </button>
-    )}
-  </div>
-);
-                              })}
+                            {/* Drag & Drop zone for files */}
+                            <div
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                setIsDraggingContactFile(true);
+                              }}
+                              onDragLeave={() => setIsDraggingContactFile(false)}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                setIsDraggingContactFile(false);
+                                const files = e.dataTransfer.files;
+                                if (files && files[0]) {
+                                  handleContactFile(files[0]);
+                                }
+                              }}
+                              className={`border-2 border-dashed rounded-2xl p-5 text-center transition-all ${
+                                isDraggingContactFile ? "border-indigo-500 bg-indigo-50/50" : "border-slate-205 bg-slate-55"
+                              }`}
+                            >
+                              <Upload className="w-7 h-7 text-indigo-400 mx-auto mb-2" />
+                              <h6 className="font-bold text-xs text-slate-800">Drag & drop contacts backup file (.csv, .vcf)</h6>
+                              <p className="text-[10px] text-slate-400">Export from Google Contacts (CSV) or iCloud (vCard) and drop here</p>
+                              <div className="mt-3">
+                                <label className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold text-slate-700 rounded-xl cursor-pointer shadow-xs inline-block transition">
+                                  Select file from storage
+                                  <input
+                                    type="file"
+                                    accept=".csv,.vcf"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      if (e.target.files && e.target.files[0]) {
+                                        handleContactFile(e.target.files[0]);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                                  Contacts Sync Status
+                                </p>
+                                <span className="text-[11px] text-emerald-600 font-extrabold flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
+                                  <span>{syncedContacts.length} Contacts Synced</span>
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => {
+                                    setShowContactSimulator(true);
+                                  }}
+                                  className="text-[9px] font-black text-indigo-600 hover:underline uppercase"
+                                >
+                                  Add Sim-Contacts
+                                </button>
+                                <span className="text-slate-300">|</span>
+                                <button
+                                  onClick={() => {
+                                    setSyncedContacts([]);
+                                    setContactsSynced(false);
+                                    triggerToast("Sync Disconnected", "Address book sync has been reset.");
+                                  }}
+                                  className="text-[9px] font-bold text-slate-400 hover:text-red-500 uppercase"
+                                >
+                                  Disconnect
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Divider uploader for adding more files when synced */}
+                            <div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-100 text-xs text-slate-650">
+                              <span>Add contact file option:</span>
+                              <label className="text-[10px] font-bold text-indigo-600 hover:underline cursor-pointer">
+                                Upload File (.csv/.vcf)
+                                <input
+                                  type="file"
+                                  accept=".csv,.vcf"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    if (e.target.files && e.target.files[0]) {
+                                      handleContactFile(e.target.files[0]);
+                                    }
+                                  }}
+                                />
+                              </label>
+                            </div>
+
+                            {/* Simple inline filter */}
+                            <div className="relative">
+                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                              <input
+                                type="text"
+                                id="contacts-filter-inp"
+                                placeholder="Search phonebook contacts..."
+                                className="w-full bg-slate-50 border border-slate-205 rounded-xl pl-9 pr-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                                onChange={(e) => {
+                                  const searchVal = e.target.value.toLowerCase().trim();
+                                  const blocks = document.querySelectorAll(".contact-card-item");
+                                  blocks.forEach(b => {
+                                    const text = b.getAttribute("data-search") || "";
+                                    if (text.includes(searchVal)) {
+                                      b.classList.remove("hidden");
+                                    } else {
+                                      b.classList.add("hidden");
+                                    }
+                                  });
+                                }}
+                              />
+                            </div>
+
+                            {/* Section breakdown */}
+                            <div className="space-y-4 max-h-[350px] overflow-y-auto pr-1">
+                              {/* 1. App Registered Matches */}
+                              <div className="space-y-2">
+                                <span className="text-[10px] uppercase font-black text-indigo-800 tracking-wider block">Matched Registry Members</span>
+                                {(() => {
+                                  let matchFound = false;
+                                  const matches = syncedContacts.map(sc => {
+                                    const registry = getSearchableProfiles();
+                                    const matched = registry.find(p => {
+                                      const scPhone = (sc.phone || "").replace(/[^0-9]/g, "");
+                                      const pPhone = (p.phone || "").replace(/[^0-9]/g, "");
+                                      return (
+                                        (scPhone && pPhone && pPhone.includes(scPhone)) ||
+                                        (sc.email && p.email && sc.email.toLowerCase().trim() === p.email.toLowerCase().trim()) ||
+                                        (sc.name.toLowerCase().trim() === p.name.toLowerCase().trim())
+                                      );
+                                    });
+                                    if (matched) matchFound = true;
+                                    return { sc, matched };
+                                  }).filter(item => item.matched);
+
+                                  if (!matchFound) {
+                                    return <p className="text-[10px] text-slate-400 italic font-medium p-2">No active members matched this address list yet.</p>;
+                                  }
+
+                                  return matches.map(({ sc, matched }, idx) => {
+                                    if (!matched) return null;
+                                    const isConnected = friends.some(f => f.id === matched.id || (f as any).username === matched.username);
+                                    const searchStr = `${sc.name.toLowerCase()} ${sc.phone || ""} ${sc.email || ""}`;
+                                    return (
+                                      <div
+                                        key={`match-${idx}`}
+                                        data-search={searchStr}
+                                        className="contact-card-item flex items-center justify-between p-3 bg-white rounded-2xl border border-slate-105 hover:bg-slate-50 transition"
+                                      >
+                                        <div className="flex items-center gap-2.5">
+                                          <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${matched.avatar || "bg-indigo-500"}`}>
+                                            {sc.name.split(" ").map(n => n[0] || "").join("")}
+                                          </span>
+                                          <div>
+                                            <span className="text-xs font-bold text-slate-800 block">{sc.name}</span>
+                                            <span className="text-[9px] text-indigo-500 font-mono">@{matched.username} &bull; Verified Member</span>
+                                          </div>
+                                        </div>
+                                        {isConnected ? (
+                                          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
+                                            Connected
+                                          </span>
+                                        ) : (
+                                          <button
+                                            onClick={() => handleImportInitiate(matched as any)}
+                                            className="text-[10.5px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl cursor-pointer shadow-xs active:scale-95"
+                                          >
+                                            Link 🤝
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  });
+                                })()}
+                              </div>
+
+                              {/* 2. Offline Contacts (Can track offline) */}
+                              <div className="space-y-2 pt-2 border-t border-slate-100">
+                                <span className="text-[10px] uppercase font-black text-slate-705 tracking-wider block">Local Celebrants (Offline trackable)</span>
+                                {(() => {
+                                  const offline = syncedContacts.filter(sc => {
+                                    const registry = getSearchableProfiles();
+                                    const isMatched = registry.some(p => {
+                                      const scPhone = (sc.phone || "").replace(/[^0-9]/g, "");
+                                      const pPhone = (p.phone || "").replace(/[^0-9]/g, "");
+                                      return (
+                                        (scPhone && pPhone && pPhone.includes(scPhone)) ||
+                                        (sc.email && p.email && sc.email.toLowerCase().trim() === p.email.toLowerCase().trim()) ||
+                                        (sc.name.toLowerCase().trim() === p.name.toLowerCase().trim())
+                                      );
+                                    });
+                                    return !isMatched;
+                                  });
+
+                                  if (offline.length === 0) {
+                                    return <p className="text-[10px] text-slate-400 italic font-medium p-2">No other contacts to display.</p>;
+                                  }
+
+                                  return offline.map((sc, idx) => {
+                                    const isConnected = friends.some(f => f.name.toLowerCase().trim() === sc.name.toLowerCase().trim());
+                                    const searchStr = `${sc.name.toLowerCase()} ${sc.phone || ""} ${sc.email || ""}`;
+                                    return (
+                                      <div
+                                        key={`off-${idx}`}
+                                        data-search={searchStr}
+                                        className="contact-card-item flex items-center justify-between p-3 bg-slate-50/50 rounded-2xl border border-slate-100 hover:bg-slate-50/80 transition"
+                                      >
+                                        <div className="flex items-center gap-2.5">
+                                          <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${sc.avatar || "bg-indigo-500"}`}>
+                                            {sc.name.split(" ").map(n => n[0] || "").join("")}
+                                          </span>
+                                          <div>
+                                            <span className="text-xs font-bold text-slate-800 block">{sc.name}</span>
+                                            <span className="text-[9px] text-slate-400 block font-normal font-sans">
+                                              Phonebook Contact &bull; Birthday {sc.birthday ? sc.birthday.substring(5) : "Pending"}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        {isConnected ? (
+                                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg">
+                                            Tracking 🎂
+                                          </span>
+                                        ) : (
+                                          <button
+                                            onClick={() => handleImportLocalContact(sc as any)}
+                                            className="text-[10.5px] font-bold text-indigo-600 hover:text-indigo-750 bg-indigo-50/60 hover:bg-indigo-100/50 px-3 py-1.5 rounded-xl cursor-pointer"
+                                          >
+                                            Track 🎂
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  });
+                                })()}
+                              </div>
                             </div>
                           </div>
                         )
@@ -3486,83 +4212,88 @@ return (
 )}
 
                   {/* Banner Profile Summary */}
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-stretch gap-4 pb-6 border-b border-slate-200">
-                    <div className="flex gap-4 items-center">
-                      <div className={`w-14 h-14 rounded-2xl ${selectedFriend.avatar} text-white flex items-center justify-center font-bold font-serif text-2xl shadow-sm`}>
-                        {selectedFriend.name.split(" ").map(n => n[0]).join("")}
-                      </div>
-
-                      {(selectedFriend.id === 'alex' || selectedFriend.connectedBack) && (
-                        <div>
-                          <h3 className="text-2xl font-black text-slate-900 tracking-tight">{selectedFriend.name}</h3>
-                          <p className="text-xs text-slate-500 font-semibold">
-                            Relationship: <span className="text-zinc-800 font-bold">{selectedFriend.relationship}</span>
-                          </p>
-                          <p className="text-xs text-slate-400 mt-0.5">Birthday: <span className="text-indigo-600 font-bold">{formatBirthdayDate(selectedFriend.birthday)} ({selectedFriend.birthday})</span></p>
-
-                          {/* Elegant coordinates tray */}
-                          <div className="flex flex-wrap items-center gap-1.5 mt-2.5 text-left">
-                            <div className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-[10.5px] font-semibold text-slate-700">
-                              <Phone className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                              <span className="text-slate-400 font-medium">Phone:</span>
-                              {revealPhone ? (
-                                <span className="font-mono text-slate-850 animate-fade-in">{selectedFriend.phone || "+233241234567"}</span>
-                              ) : (
-                                <button
-                                  onClick={() => setRevealPhone(true)}
-                                  className="text-[10px] text-indigo-600 hover:text-indigo-800 font-extrabold hover:underline cursor-pointer flex items-center gap-0.5"
-                                >
-                                  Reveal Number
-                                </button>
-                              )}
-                            </div>
-                            <div className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-[10.5px] font-semibold text-slate-700">
-                              <MessageSquare className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                              <span className="text-slate-400 font-medium">WhatsApp:</span>
-                              {revealWhatsApp ? (
-                                <span className="font-mono text-slate-850 animate-fade-in">{selectedFriend.whatsapp || "+233241234567"}</span>
-                              ) : (
-                                <button
-                                  onClick={() => setRevealWhatsApp(true)}
-                                  className="text-[10px] text-emerald-600 hover:text-emerald-800 font-extrabold hover:underline cursor-pointer flex items-center gap-0.5"
-                                >
-                                  Reveal Number
-                                </button>
-                              )}
-                            </div>
-                            <div className="bg-amber-50/50 hover:bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 flex items-center gap-1 text-[10.5px] font-semibold">
-                              <span className="text-amber-600 font-bold">Snapchat:</span>
-                              <span className="font-mono text-amber-800 font-bold">@{selectedFriend.snapchat || "friend_snap"}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                  <div className="flex flex-col items-center text-center pb-8 border-b border-slate-100 w-full animate-fade-in">
+                    {/* Centered Large Avatar */}
+                    <div className={`w-24 h-24 rounded-full ${selectedFriend.avatar} text-white flex items-center justify-center font-bold font-serif text-4xl shadow-md mb-4`}>
+                      {selectedFriend.name.split(" ").map(n => n[0] || "").join("").toUpperCase()}
                     </div>
 
+                    {/* Large Centered Name */}
+                    <h3 className="text-3xl font-black text-slate-900 tracking-tight">{selectedFriend.name}</h3>
+
+                    {/* Cleaner and smaller metadata layout */}
                     {(selectedFriend.id === 'alex' || selectedFriend.connectedBack) && (
-                      <div className="flex flex-col justify-end gap-2 text-right">
-                        <div className="bg-indigo-50 border border-indigo-100 text-indigo-700 px-3 py-1 rounded-xl text-xs font-semibold w-fit self-end flex items-center gap-1 bg-opacity-60">
-                          <Clock className="w-3.5 h-3.5" />
+                      <div className="flex flex-wrap justify-center items-center gap-2 mt-2.5 text-xs">
+                        <span className="text-[11px] text-slate-650 font-bold bg-slate-100 px-2.5 py-1 rounded-full">
+                          {selectedFriend.relationship}
+                        </span>
+                        <span className="text-[11px] text-indigo-700 font-extrabold bg-indigo-50/60 px-2.5 py-1 rounded-full flex items-center gap-1">
+                          <Cake className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                          <span>{formatBirthdayDate(selectedFriend.birthday)} ({selectedFriend.birthday})</span>
+                        </span>
+                        <span className="text-[11px] text-purple-700 font-bold bg-purple-50/50 px-2.5 py-1 rounded-full flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-purple-500 shrink-0" />
                           <span>In {calculateDaysRemaining(selectedFriend.birthday)} Days</span>
-                        </div>
-                        
-                        <div className="flex gap-1.5 justify-end">
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Row of 3 clickable icon buttons */}
+                    {(selectedFriend.id === 'alex' || selectedFriend.connectedBack) && (
+                      <div className="flex justify-center items-center gap-4 mt-6">
+                        {/* Phone Button */}
+                        <a
+                          href={`tel:${selectedFriend.phone || "+233241234567"}`}
+                          className="w-12 h-12 rounded-full bg-slate-50 hover:bg-indigo-50 text-slate-650 hover:text-indigo-600 border border-slate-200/80 hover:border-indigo-200 flex items-center justify-center shadow-3xs transition-all active:scale-90"
+                          title="Call phone number"
+                        >
+                          <Phone className="w-5 h-5" />
+                        </a>
+
+                        {/* WhatsApp Button */}
+                        <a
+                          href={`https://wa.me/${(selectedFriend.whatsapp || selectedFriend.phone || "+233241234567").replace(/[^0-9]/g, "")}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-12 h-12 rounded-full bg-slate-50 hover:bg-emerald-50 text-slate-650 hover:text-emerald-600 border border-slate-200/80 hover:border-emerald-200 flex items-center justify-center shadow-3xs transition-all active:scale-90"
+                          title="Message on WhatsApp"
+                        >
+                          <MessageSquare className="w-5 h-5" />
+                        </a>
+
+                        {/* Username copy to clipboard Button */}
+                        <button
+                          onClick={() => {
+                            const handle = selectedFriend.snapchat || (selectedFriend as any).username || "friend_user";
+                            navigator.clipboard.writeText(handle);
+                            triggerToast("Copied 📋", `Username @${handle} copied to clipboard!`);
+                          }}
+                          className="w-12 h-12 rounded-full bg-slate-50 hover:bg-amber-50 text-slate-650 hover:text-amber-600 border border-slate-200/80 hover:border-amber-200 flex items-center justify-center shadow-3xs transition-all cursor-pointer active:scale-90"
+                          title="Copy Username"
+                        >
+                          <Copy className="w-5 h-5" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Action buttons (Edit, Delete) cleanly matching below */}
+                    {(selectedFriend.id === 'alex' || selectedFriend.connectedBack) && (
+                      <div className="flex gap-2 mt-5">
+                        <button
+                          onClick={() => setIsEditingFriend(!isEditingFriend)}
+                          className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200/70 border border-slate-200 rounded-lg transition-all"
+                        >
+                          {isEditingFriend ? "Close Editor" : "Edit Profile Details"}
+                        </button>
+                        {selectedFriend.id !== 'alex' && (
                           <button
-                            onClick={() => setIsEditingFriend(!isEditingFriend)}
-                            className="px-3 py-1 text-[11px] font-bold text-slate-700 hover:text-indigo-600 bg-slate-150 rounded"
+                            onClick={() => handleDeleteFriendProfile(selectedFriend.id)}
+                            className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg transition-all"
+                            title="Delete companion profile"
                           >
-                            {isEditingFriend ? "Close Editor" : "Edit Profile Details"}
+                            <Trash className="w-4 h-4" />
                           </button>
-                          {selectedFriend.id !== 'alex' && (
-                            <button
-                              onClick={() => handleDeleteFriendProfile(selectedFriend.id)}
-                              className="p-1 px-1.5 bg-rose-50 text-rose-600 rounded text-[11px]"
-                              title="Delete companion profile"
-                            >
-                              <Trash className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -4048,16 +4779,42 @@ return (
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4">
-                        <div className="bg-teal-50 p-4 rounded-2xl border border-teal-150 text-left min-w-[130px]">
-                          <span className="text-[9px] font-bold text-teal-800 uppercase block select-none">Desires bound</span>
-                          <span className="text-xl font-bold text-slate-900 block font-mono">{friends.find(f => f.id === 'alex')?.wishlist.length} items</span>
+                      <div className="flex flex-col sm:flex-row md:flex-row items-center gap-6 justify-between flex-1 md:flex-initial">
+                        <div className="flex items-center gap-4">
+                          <div className="bg-teal-50 p-4 rounded-2xl border border-teal-150 text-left min-w-[130px]">
+                            <span className="text-[9px] font-bold text-teal-800 uppercase block select-none">Desires bound</span>
+                            <span className="text-xl font-bold text-slate-900 block font-mono">{friends.find(f => f.id === 'alex')?.wishlist.length} items</span>
+                          </div>
+                          <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-150 text-left min-w-[130px]">
+                            <span className="text-[9px] font-bold text-indigo-800 uppercase block select-none">Claimed by friends</span>
+                            <span className="text-xl font-bold text-slate-900 block font-mono">
+                              {friends.find(f => f.id === 'alex')?.wishlist.filter(w => w.isClaimed).length} items
+                            </span>
+                          </div>
                         </div>
-                        <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-150 text-left min-w-[130px]">
-                          <span className="text-[9px] font-bold text-indigo-800 uppercase block select-none">Claimed by friends</span>
-                          <span className="text-xl font-bold text-slate-900 block font-mono">
-                            {friends.find(f => f.id === 'alex')?.wishlist.filter(w => w.isClaimed).length} items
-                          </span>
+
+                        <div className="flex flex-col justify-center gap-2 pl-0 md:pl-6 border-t pt-4 sm:pt-0 sm:border-t-0 md:border-t-0 md:border-l md:border-slate-150 w-full sm:w-auto min-w-[160px]">
+                          <button
+                            type="button"
+                            onClick={() => setIsShareModalOpen(true)}
+                            className="bg-indigo-600 hover:bg-indigo-755 text-white text-xs font-black py-2.5 px-4 rounded-xl shadow cursor-pointer transition-colors flex items-center justify-center gap-1.5"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                            <span>Share QR Pass</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const username = userSession ? userSession.username : "alex";
+                              const shareUrl = `${window.location.origin}/?user=${username}`;
+                              navigator.clipboard.writeText(shareUrl);
+                              triggerToast("Copied External Link! 🔗", "Ready to share with friends outside the app.");
+                            }}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Share2 className="w-3 h-3" />
+                            <span>Copy Share Link</span>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -4565,9 +5322,7 @@ return (
                               checked={notifyWhatsApp}
                               onChange={(e) => {
                                 setNotifyWhatsApp(e.target.checked);
-                                if (soundEffectsEnabled) {
-                                  try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                                }
+                                playNotificationSound();
                                 triggerToast("Preference Synced", `WhatsApp messaging is now ${e.target.checked ? "Enabled" : "Disabled"}.`);
                               }}
                               className="w-4.5 h-4.5 text-indigo-600 border-slate-350 rounded focus:ring-indigo-500 cursor-pointer"
@@ -4586,9 +5341,7 @@ return (
                               checked={notifySnapchat}
                               onChange={(e) => {
                                 setNotifySnapchat(e.target.checked);
-                                if (soundEffectsEnabled) {
-                                  try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                                }
+                                playNotificationSound();
                                 triggerToast("Preference Synced", `Snapchat reminders are now ${e.target.checked ? "Enabled" : "Disabled"}.`);
                               }}
                               className="w-4.5 h-4.5 text-indigo-600 border-slate-350 rounded focus:ring-indigo-505 cursor-pointer"
@@ -4788,9 +5541,7 @@ return (
                           <button
                             type="button"
                             onClick={() => {
-                              if (soundEffectsEnabled) {
-                                try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                              }
+                              playNotificationSound();
                               triggerToast("Ping sent 🔔", "A fun notification sound just played.");
                             }}
                             className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-black rounded-lg transition-colors cursor-pointer text-center"
@@ -4853,9 +5604,7 @@ return (
                           onClick={() => {
                             setNotifyAdvanceDays(7);
                             triggerToast("Lead-time Optimized", "Adjusted advance warning lead-time to 7 days for boutique preparation.");
-                            if (soundEffectsEnabled) {
-                              try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                            }
+                            playNotificationSound();
                           }}
                           className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 hover:scale-[1.02] text-white font-black text-xs rounded-xl transition-all cursor-pointer shadow-xs shrink-0"
                         >
@@ -4877,7 +5626,7 @@ return (
                           onClick={() => {
                             setSoundEffectsEnabled(true);
                             triggerToast("Acoustics Optimized", "Auditory sound effect chimes have been enabled.");
-                            try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
+                            playNotificationSound(true);
                           }}
                           className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 hover:scale-[1.02] text-white font-black text-xs rounded-xl transition-all cursor-pointer shadow-xs shrink-0"
                         >
@@ -4899,9 +5648,7 @@ return (
                           onClick={() => {
                             setGlobalVisibility("Linked");
                             triggerToast("Privacy Tuned", "Discoverability restricted to Linked Buddies Only.");
-                            if (soundEffectsEnabled) {
-                              try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                            }
+                            playNotificationSound();
                           }}
                           className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 hover:scale-[1.02] text-white font-black text-xs rounded-xl transition-all cursor-pointer shadow-xs shrink-0"
                         >
@@ -4923,9 +5670,7 @@ return (
                           onClick={() => {
                             setConfettiOnBirthdays(true);
                             triggerToast("Festivals Enabled", "Milestone confetti explosion triggers have been enabled.");
-                            if (soundEffectsEnabled) {
-                              try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                            }
+                            playNotificationSound();
                           }}
                           className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 hover:scale-[1.02] text-white font-black text-xs rounded-xl transition-all cursor-pointer shadow-xs shrink-0"
                         >
@@ -4947,9 +5692,7 @@ return (
                           onClick={() => {
                             setAutoApproveHandshakes(true);
                             triggerToast("QR Sync Automation Activated", "Handshake reciprocity set to auto-mirror.");
-                            if (soundEffectsEnabled) {
-                              try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                            }
+                            playNotificationSound();
                           }}
                           className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 hover:scale-[1.02] text-white font-black text-xs rounded-xl transition-all cursor-pointer shadow-xs shrink-0"
                         >
@@ -5245,16 +5988,42 @@ return (
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
-                      <div className="bg-teal-50 p-4 rounded-2xl border border-teal-150 text-left min-w-[130px]">
-                        <span className="text-[9px] font-bold text-teal-800 uppercase block select-none">Desires bound</span>
-                        <span className="text-xl font-bold text-slate-900 block font-mono">{friends.find(f => f.id === 'alex')?.wishlist.length} items</span>
+                    <div className="flex flex-col sm:flex-row md:flex-row items-center gap-6 justify-between flex-1 md:flex-initial">
+                      <div className="flex items-center gap-4">
+                        <div className="bg-teal-50 p-4 rounded-2xl border border-teal-150 text-left min-w-[130px]">
+                          <span className="text-[9px] font-bold text-teal-800 uppercase block select-none">Desires bound</span>
+                          <span className="text-xl font-bold text-slate-900 block font-mono">{friends.find(f => f.id === 'alex')?.wishlist.length} items</span>
+                        </div>
+                        <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-150 text-left min-w-[130px]">
+                          <span className="text-[9px] font-bold text-indigo-800 uppercase block select-none">Claimed by friends</span>
+                          <span className="text-xl font-bold text-slate-900 block font-mono">
+                            {friends.find(f => f.id === 'alex')?.wishlist.filter(w => w.isClaimed).length} items
+                          </span>
+                        </div>
                       </div>
-                      <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-150 text-left min-w-[130px]">
-                        <span className="text-[9px] font-bold text-indigo-800 uppercase block select-none">Claimed by friends</span>
-                        <span className="text-xl font-bold text-slate-900 block font-mono">
-                          {friends.find(f => f.id === 'alex')?.wishlist.filter(w => w.isClaimed).length} items
-                        </span>
+
+                      <div className="flex flex-col justify-center gap-2 pl-0 md:pl-6 border-t pt-4 sm:pt-0 sm:border-t-0 md:border-t-0 md:border-l md:border-slate-150 w-full sm:w-auto min-w-[160px]">
+                        <button
+                          type="button"
+                          onClick={() => setIsShareModalOpen(true)}
+                          className="bg-indigo-600 hover:bg-indigo-755 text-white text-xs font-black py-2.5 px-4 rounded-xl shadow cursor-pointer transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>Share QR Pass</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const username = userSession ? userSession.username : "alex";
+                            const shareUrl = `${window.location.origin}/?user=${username}`;
+                            navigator.clipboard.writeText(shareUrl);
+                            triggerToast("Copied External Link! 🔗", "Ready to share with friends outside the app.");
+                          }}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Share2 className="w-3 h-3" />
+                          <span>Copy Share Link</span>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -5560,15 +6329,46 @@ return (
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 space-y-3">
+                      <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 space-y-4">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-black uppercase tracking-wider text-slate-500">Email Birthday Alerts</span>
                           <input
                             type="checkbox"
                             checked={enableEmailReminders}
                             onChange={(e) => setEnableEmailReminders(e.target.checked)}
-                            className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                            className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer"
                           />
+                        </div>
+
+                        <div className="border-t border-slate-200/80 pt-3">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Reminder Chime Sound</label>
+                          <select
+                            value={reminderChime}
+                            onChange={(e) => {
+                              const selected = e.target.value;
+                              setReminderChime(selected);
+                              // Preview sound selection immediately
+                              const chimeUrls: Record<string, string> = {
+                                default: "https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav",
+                                bell: "https://assets.mixkit.co/active_storage/sfx/911/911-84.wav",
+                                marimba: "https://assets.mixkit.co/active_storage/sfx/1653/1653-84.wav",
+                                digital: "https://assets.mixkit.co/active_storage/sfx/2568/2568-84.wav",
+                                sweet: "https://assets.mixkit.co/active_storage/sfx/2018/2018-84.wav"
+                              };
+                              try {
+                                const audioObj = new Audio(chimeUrls[selected]);
+                                audioObj.volume = 0.5;
+                                audioObj.play();
+                              } catch(err){}
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded-2xl px-3 py-2 text-xs font-semibold text-slate-900 outline-none focus:border-indigo-500 cursor-pointer mt-1"
+                          >
+                            <option value="default">🔔 Joyful Ping (Default)</option>
+                            <option value="bell">🔔 Classic Bell Resonance</option>
+                            <option value="marimba">🔔 Elegant Marimba Melody</option>
+                            <option value="digital">🔔 Modern Bubble Pop</option>
+                            <option value="sweet">🔔 Gentle Glockenspiel</option>
+                          </select>
                         </div>
                       </div>
 
@@ -5604,6 +6404,52 @@ return (
                     </div>
 
                     <div className="border-t border-slate-200 pt-4 space-y-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!signInName.trim() || !signInUsername.trim()) {
+                            triggerToast("Invalid Inputs ⚠️", "Please fill in your name and username.");
+                            return;
+                          }
+                          const updatedSess = {
+                            ...userSession,
+                            name: signInName.trim(),
+                            username: signInUsername.trim(),
+                            phone: signInPhone.trim(),
+                            enableEmailReminders: enableEmailReminders,
+                          };
+
+                          // Save to local storage
+                          localStorage.setItem("birthday_authenticated_user", JSON.stringify(updatedSess));
+                          setUserSession(updatedSess as any);
+
+                          // Save to Firestore
+                          if (userSession?.uid) {
+                            try {
+                              const { doc, setDoc } = await import("firebase/firestore");
+                              await setDoc(doc(db, "users", userSession.uid), {
+                                name: signInName.trim(),
+                                username: signInUsername.trim(),
+                                phone: signInPhone.trim(),
+                                enableEmailReminders: enableEmailReminders,
+                              }, { merge: true });
+                              triggerToast("Settings Saved! 💾", "Your profile and configuration changes are securely stored.");
+                              setIsProfileSettingsOpen(false);
+                              appendLog(`⚙️ Config: Updated profile settings for @${signInUsername.trim()}.`);
+                            } catch (e) {
+                              console.error(e);
+                              triggerToast("Sync Error ⚠️", "Saved locally, but failed to sync to cloud database.");
+                            }
+                          } else {
+                            triggerToast("Settings Saved! 💾", "Your offline profile changes have been applied.");
+                            setIsProfileSettingsOpen(false);
+                          }
+                        }}
+                        className="w-full bg-indigo-650 hover:bg-indigo-700 text-white py-3 rounded-2xl font-black text-sm transition cursor-pointer text-center block shadow-3xs"
+                      >
+                        Save Profile Changes
+                      </button>
+
                       <button
                         type="button"
                         onClick={async () => {
@@ -5716,9 +6562,7 @@ return (
                           triggerToast("Deposit Successful 🎉", `Added GHS ${amt.toFixed(2)} to your wallet balance.`);
                           setDepositAmount("");
                           setShowDepositForm(false);
-                          if (soundEffectsEnabled) {
-                            try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                          }
+                          playNotificationSound();
                         }}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
                       >
@@ -5759,9 +6603,7 @@ return (
                           triggerToast("Withdrawal Successful 💸", `Withdrew GHS ${amt.toFixed(2)} from your wallet balance.`);
                           setWithdrawAmount("");
                           setShowWithdrawForm(false);
-                          if (soundEffectsEnabled) {
-                            try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                          }
+                          playNotificationSound();
                         }}
                         className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
                       >
@@ -6181,9 +7023,7 @@ return (
                                 appendLog(`Dispatched Interactive ${customGiftStoreItem.name} Present to ${selectedFriend.name} via ${giftPaymentMethod === "momo" ? "Mobile Money" : "Secure Node Pay"}.`);
 
                                 // Fire audio if available
-                                if (soundEffectsEnabled) {
-                                  try { new Audio("https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav").play(); } catch(e){}
-                                }
+                                playNotificationSound();
 
                                 setIsGiftProcessing(false);
                                 setCustomGiftStoreItem(null);
@@ -6197,7 +7037,7 @@ return (
                                 : "bg-rose-600 hover:bg-rose-700 shadow-md shadow-rose-200"
                             }`}
                           >
-                            Proceed &amp; Authorize Sandbox Transaction
+                            Proceed & Authorize Sandbox Transaction
                           </button>
                         </>
                       )}
@@ -6210,197 +7050,200 @@ return (
 
 
           {/* ==================== SCREEN 8: PREMIUM PLANS & SYSTEM CONFIGURATION ==================== */}
-          {activeSection === "upgrade" && (
-            <div className="space-y-6 text-left animate-fade-in" id="view-upgrade-hull">
-              {/* Top Banner */}
-              <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 rounded-3xl text-left text-white shadow-xl relative overflow-hidden">
-                <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-indigo-500/10 pointer-events-none blur-3xl opacity-30" />
-                <h3 className="text-xl md:text-2xl font-black text-white flex items-center gap-2">
-                  <Sparkles className="w-6 h-6 text-indigo-400" />
-                  <span>Plans</span>
-                </h3>
-                <p className="text-xs text-indigo-200 mt-1.5 leading-relaxed max-w-xl font-sans">
-                  Manage your subscription level, toggle email reminders settings, customize handles, or bulk-import members for corporate campaigns.
-                </p>
-              </div>
+          {activeSection === "upgrade" && (() => {
+            const AFRICAN_COUNTRIES = [
+              "DZ", "AO", "BJ", "BW", "BF", "BI", "CV", "CM", "CF", "TD", "KM", "CD", "CG",
+              "CI", "DJ", "EG", "GQ", "ER", "SZ", "ET", "GA", "GM", "GH", "GN", "GW", "KE",
+              "LS", "LR", "LY", "MG", "MW", "ML", "MR", "MU", "MA", "MZ", "NA", "NE", "NG",
+              "RW", "ST", "SN", "SC", "SL", "SO", "ZA", "SS", "SD", "TZ", "TG", "TN", "UG",
+              "ZM", "ZW"
+            ];
 
-              {/* Two-Column Workspace */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                
-                {/* Column 1: Pricing Tiers & Subscription (Span 7) */}
-                <div className="lg:col-span-7 bg-white rounded-[2rem] border border-slate-200 p-6 md:p-8 shadow-xs space-y-6">
-                  <div>
-                             </div>
+            const countryCode = (userSession as any)?.countryCode || "GH";
+            const isGhana = countryCode.toUpperCase() === "GH";
+            const isAfrica = AFRICAN_COUNTRIES.includes(countryCode.toUpperCase());
 
-                  {/* Location & Billing Integrated Settings Selector */}
-                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    {/* Billing Cycle Toggle */}
-                    <div className="text-left w-full sm:w-auto">
-                      <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Billing Cycle</span>
-                      <div className="flex bg-slate-200/80 p-0.5 rounded-xl border border-slate-300 w-fit">
-                        <button
-                          type="button"
-                          onClick={() => setBillingCycle("monthly")}
-                          className={`px-3 py-1 text-[10px] font-extrabold rounded-lg transition-all cursor-pointer ${
-                            billingCycle === "monthly" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          Monthly
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBillingCycle("annual")}
-                          className={`px-3 py-1 text-[10px] font-extrabold rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
-                            billingCycle === "annual" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          <span>Annual</span>
-                          <span className="bg-emerald-500 text-white text-[8px] font-black px-1.5 rounded-full scale-90">Saves 19%+</span>
-                        </button>
-                      </div>
-                    </div>
+            const isYearly = billingCycle === "annual";
 
-                    {/* Manual Location Selection */}
-                    <div className="w-full sm:w-auto text-left sm:text-right">
-                      <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Location Tier</span>
-                      <select
-                        value={userRegion}
-                        onChange={(e) => {
-                          const val = e.target.value as any;
-                          setUserRegion(val);
-                          triggerToast("Region Saved 🌍", `Prices adjusted automatically to match localization rules.`);
-                        }}
-                        className="bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-[10px] font-extrabold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-150 shadow-xs cursor-pointer"
-                      >
-                        <option value="Ghana">🇬🇭 Ghana (GHS)</option>
-                        <option value="Other Africa">🌍 Other Africa (USD)</option>
-                        <option value="USA/Western">🗽 USA &amp; Western (USD)</option>
-                        <option value="Default">🌐 Global default (USD)</option>
-                      </select>
-                    </div>
-                  </div>
+            let proPriceFormatted = "";
+            let businessPriceFormatted = "";
+            let savePercentagePro = "";
+            
+            if (isGhana) {
+              proPriceFormatted = isYearly ? "GHS 99" : "GHS 10";
+              businessPriceFormatted = isYearly ? "GHS 1,999" : "GHS 200";
+              savePercentagePro = "Save 17%";
+            } else if (isAfrica) {
+              proPriceFormatted = isYearly ? "$14" : "$1.50";
+              businessPriceFormatted = isYearly ? "$199" : "$20";
+              savePercentagePro = "Save 22%";
+            } else {
+              proPriceFormatted = isYearly ? "$29" : "$3";
+              businessPriceFormatted = isYearly ? "$399" : "$40";
+              savePercentagePro = "Save 19%";
+            }
 
-                  {/* Grid of Plans */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* Free Plan */}
-                    <div className={`p-5 rounded-2xl border flex flex-col justify-between ${accountType === "Free" ? "bg-amber-500/5 border-amber-400 ring-2 ring-amber-400" : "bg-slate-50 border-slate-200 opacity-80"}`}>
-                      <div>
-                        {accountType === "Free" && <span className="bg-amber-500 text-slate-950 font-black tracking-widest text-[8px] uppercase px-2 py-0.5 rounded-full block w-fit mb-3">Active Now</span>}
-                        <h5 className="font-extrabold text-sm text-slate-900">Free Tier</h5>
-                        <p className="text-[10px] text-slate-500 mt-1">For basic tracking needs.</p>
-                        <div className="my-3">
-                          <span className="text-xl font-black text-slate-900">
-                            {userRegion === "Ghana" ? "GHS 0" : "$0"}
-                          </span>
-                          <span className="text-[10px] text-slate-400">/{billingCycle === "monthly" ? "mo" : "yr"}</span>
+            return (
+              <div className="space-y-6 text-left animate-fade-in" id="view-upgrade-hull">
+                {/* Top Banner */}
+                <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 rounded-3xl text-left text-white shadow-xl relative overflow-hidden">
+                  <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-indigo-500/10 pointer-events-none blur-3xl opacity-30" />
+                  <h3 className="text-xl md:text-2xl font-black text-white flex items-center gap-2">
+                    <Sparkles className="w-6 h-6 text-indigo-400" />
+                    <span>Plans</span>
+                  </h3>
+                  <p className="text-xs text-indigo-200 mt-1.5 leading-relaxed max-w-xl font-sans">
+                    Manage your subscription level, toggle email reminders settings, customize handles, or bulk-import members for corporate campaigns.
+                  </p>
+                </div>
+
+                {/* Two-Column Workspace */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  
+                  {/* Column 1: Pricing Tiers & Subscription (Span 7) */}
+                  <div className="lg:col-span-7 bg-white rounded-[2rem] border border-slate-200 p-6 md:p-8 shadow-xs space-y-6">
+                    
+                    {/* Location & Billing Integrated Settings Selector */}
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+                      {/* Billing Cycle Toggle */}
+                      <div className="text-left w-full sm:w-auto">
+                        <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Billing Cycle</span>
+                        <div className="flex bg-slate-200/80 p-0.5 rounded-xl border border-slate-300 w-fit">
+                          <button
+                            type="button"
+                            onClick={() => setBillingCycle("monthly")}
+                            className={`px-3 py-1 text-[10px] font-extrabold rounded-lg transition-all cursor-pointer ${
+                              billingCycle === "monthly" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                            }`}
+                          >
+                            Monthly
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBillingCycle("annual")}
+                            className={`px-3 py-1 text-[10px] font-extrabold rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                              billingCycle === "annual" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                            }`}
+                          >
+                            <span>Annual</span>
+                            <span className="bg-emerald-500 text-white text-[8px] font-black px-1.5 rounded-full scale-90">Saves 19%+</span>
+                          </button>
                         </div>
-                        <ul className="text-[10px] space-y-1.5 text-slate-600 font-semibold leading-tight">
-                          <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> Max 5 friends</li>
-                          <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> In-app alerts</li>
-                          <li className="flex items-center gap-1 text-slate-400"><span className="text-slate-300">✕</span> Email Reminders</li>
-                          <li className="flex items-center gap-1 text-slate-400"><span className="text-slate-300">✕</span> Bulk CSV imports</li>
-                        </ul>
                       </div>
-                      <button 
-                        disabled={accountType === "Free"}
-                        onClick={() => {
-                          setAccountType("Free");
-                          triggerToast("Switched to Free plan", "Reverted account to standard Free limit.");
-                          appendLog("💳 Transaction: Member plan changed to Free.");
-                        }}
-                        className={`w-full py-1.8 mt-4 rounded-xl text-[10px] font-bold ${accountType === "Free" ? "bg-amber-400 text-slate-950 cursor-default" : "bg-slate-200 hover:bg-slate-300 text-slate-700 pointer-events-auto cursor-pointer"}`}
-                      >
-                        {accountType === "Free" ? "Active" : "Downgrade"}
-                      </button>
+
+                      {/* Auto Detected Location Display */}
+                      <div className="w-full sm:w-auto text-left sm:text-right">
+                        <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Billing Region</span>
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl text-[10px] font-extrabold text-indigo-800 shadow-xs">
+                          <span className="text-xs">🌏</span>
+                          <span>Auto-detect ({countryCode}) • {isGhana ? "GHS Pricing" : isAfrica ? "Pan-African USD" : "Western Global USD"}</span>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Pro Plan */}
-                    <div className={`p-5 rounded-2xl border flex flex-col justify-between ${accountType === "Pro" ? "bg-[#FAF9FF] border-indigo-500 ring-2 ring-indigo-500" : "bg-slate-50 border-slate-200"}`}>
-                      <div>
-                        {accountType === "Pro" && <span className="bg-indigo-600 text-white font-black tracking-widest text-[8px] uppercase px-2 py-0.5 rounded-full block w-fit mb-3">Active Now</span>}
-                        <h5 className="font-extrabold text-sm text-slate-900">Pro VIP</h5>
-                        <p className="text-[10px] text-slate-500 mt-1">For true gift organizers.</p>
-                        <div className="my-3 relative">
-                          <span className="text-xl font-black text-slate-900">
-                            {userRegion === "Ghana" 
-                              ? (billingCycle === "monthly" ? "GHS 10" : "GHS 99")
-                              : userRegion === "USA/Western"
-                                ? (billingCycle === "monthly" ? "$3" : "$29")
-                                : (billingCycle === "monthly" ? "$1.50" : "$14")
-                            }
-                          </span>
-                          <span className="text-[10px] text-slate-400">/{billingCycle === "monthly" ? "mo" : "yr"}</span>
-                          {billingCycle === "annual" && (
-                            <span className="absolute -top-4 right-0 bg-emerald-100 text-emerald-800 text-[8px] font-bold px-1 py-0.2 rounded">
-                              {userRegion === "Ghana" ? "Save 17%" : userRegion === "USA/Western" ? "Save 19%" : "Save 22%"}
+                    {/* Grid of Plans */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Free Plan */}
+                      <div className={`p-5 rounded-2xl border flex flex-col justify-between ${accountType === "Free" ? "bg-amber-500/5 border-amber-400 ring-2 ring-amber-400" : "bg-slate-50 border-slate-200 opacity-80"}`}>
+                        <div>
+                          {accountType === "Free" && <span className="bg-amber-500 text-slate-950 font-black tracking-widest text-[8px] uppercase px-2 py-0.5 rounded-full block w-fit mb-3">Active Now</span>}
+                          <h5 className="font-extrabold text-sm text-slate-900">Free Tier</h5>
+                          <p className="text-[10px] text-slate-500 mt-1">For basic tracking needs.</p>
+                          <div className="my-3">
+                            <span className="text-xl font-black text-slate-900">
+                              {isGhana ? "GHS 0" : "$0"}
                             </span>
-                          )}
+                            <span className="text-[10px] text-slate-400">/{billingCycle === "monthly" ? "mo" : "yr"}</span>
+                          </div>
+                          <ul className="text-[10px] space-y-1.5 text-slate-600 font-semibold leading-tight">
+                            <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> Max 5 friends</li>
+                            <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> In-app alerts</li>
+                            <li className="flex items-center gap-1 text-slate-400"><span className="text-slate-300">✕</span> Email Reminders</li>
+                            <li className="flex items-center gap-1 text-slate-400"><span className="text-slate-300">✕</span> Bulk CSV imports</li>
+                          </ul>
                         </div>
-                        <ul className="text-[10px] space-y-1.5 text-slate-600 font-semibold leading-tight">
-                          <li className="flex items-center gap-1 text-indigo-950 font-bold"><span className="text-emerald-500 text-xs">✓</span> Unlimited friends</li>
-                          <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> 7d and 1d warnings</li>
-                          <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> 📧 Optional Email alerts</li>
-                          <li className="flex items-center gap-1 text-slate-400"><span className="text-slate-300">✕</span> Bulk CSV imports</li>
-                        </ul>
+                        <button 
+                          disabled={accountType === "Free"}
+                          onClick={() => {
+                            setAccountType("Free");
+                            triggerToast("Switched to Free plan", "Reverted account to standard Free limit.");
+                            appendLog("💳 Transaction: Member plan changed to Free.");
+                          }}
+                          className={`w-full py-1.8 mt-4 rounded-xl text-[10px] font-bold ${accountType === "Free" ? "bg-amber-400 text-slate-950 cursor-default" : "bg-slate-200 hover:bg-slate-300 text-slate-700 pointer-events-auto cursor-pointer"}`}
+                        >
+                          {accountType === "Free" ? "Active" : "Downgrade"}
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => {
-                          setAccountType("Pro");
-                          const activePrice = userRegion === "Ghana" 
-                            ? (billingCycle === "monthly" ? "GHS 10/mo" : "GHS 99/yr")
-                            : userRegion === "USA/Western"
-                              ? (billingCycle === "monthly" ? "$3/mo" : "$29/yr")
-                              : (billingCycle === "monthly" ? "$1.50/mo" : "$14/yr");
-                          triggerToast("Upgraded to Pro VIP 👑", `Unlocked infinite buddy profiles, alerts warnings and email syncing matching ${activePrice}.`);
-                          appendLog(`💳 Transaction: Member plan upgraded to Pro VIP (${activePrice}).`);
-                        }}
-                        className={`w-full py-1.8 mt-4 rounded-xl text-[10px] font-bold ${accountType === "Pro" ? "bg-indigo-600 text-white cursor-default" : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 cursor-pointer"}`}
-                      >
-                        {accountType === "Pro" ? "Active Plan 👑" : "Upgrade to Pro"}
-                      </button>
-                    </div>
 
-                    {/* Business Plan */}
-                    <div className={`p-5 rounded-2xl border flex flex-col justify-between ${accountType === "Business" ? "bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500" : "bg-slate-50 border-slate-200"}`}>
-                      <div>
-                        {accountType === "Business" && <span className="bg-emerald-600 text-white font-black tracking-widest text-[8px] uppercase px-2 py-0.5 rounded-full block w-fit mb-3">Active Now</span>}
-                        <h5 className="font-extrabold text-sm text-slate-900">Business Elite</h5>
-                        <p className="text-[10px] text-slate-500 mt-1">For clubs &amp; retail circles.</p>
-                        <div className="my-3 relative">
-                          <span className="text-xl font-black text-slate-900">
-                            {userRegion === "Ghana" 
-                              ? (billingCycle === "monthly" ? "GHS 200" : "GHS 1,999")
-                              : userRegion === "USA/Western"
-                                ? (billingCycle === "monthly" ? "$40" : "$399")
-                                : (billingCycle === "monthly" ? "$20" : "$199")
-                            }
-                          </span>
-                          <span className="text-[10px] text-slate-400">/{billingCycle === "monthly" ? "mo" : "yr"}</span>
+                      {/* Pro Plan */}
+                      <div className={`p-5 rounded-2xl border flex flex-col justify-between ${accountType === "Pro" ? "bg-[#FAF9FF] border-indigo-500 ring-2 ring-indigo-500" : "bg-slate-50 border-slate-200"}`}>
+                        <div>
+                          {accountType === "Pro" && <span className="bg-indigo-600 text-white font-black tracking-widest text-[8px] uppercase px-2 py-0.5 rounded-full block w-fit mb-3">Active Now</span>}
+                          <h5 className="font-extrabold text-sm text-slate-900">Pro VIP</h5>
+                          <p className="text-[10px] text-slate-500 mt-1">For true gift organizers.</p>
+                          <div className="my-3 relative">
+                            <span className="text-xl font-black text-slate-900">
+                              {proPriceFormatted}
+                            </span>
+                            <span className="text-[10px] text-slate-400">/{billingCycle === "monthly" ? "mo" : "yr"}</span>
+                            {billingCycle === "annual" && (
+                              <span className="absolute -top-4 right-0 bg-emerald-100 text-emerald-800 text-[8px] font-bold px-1 py-0.2 rounded">
+                                {savePercentagePro}
+                              </span>
+                            )}
+                          </div>
+                          <ul className="text-[10px] space-y-1.5 text-slate-600 font-semibold leading-tight">
+                            <li className="flex items-center gap-1 text-indigo-950 font-bold"><span className="text-emerald-500 text-xs">✓</span> Unlimited friends</li>
+                            <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> 7d and 1d warnings</li>
+                            <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> 📧 Optional Email alerts</li>
+                            <li className="flex items-center gap-1 text-slate-400"><span className="text-slate-300">✕</span> Bulk CSV imports</li>
+                          </ul>
                         </div>
-                        <ul className="text-[10px] space-y-1.5 text-slate-600 font-semibold leading-tight">
-                          <li className="flex items-center gap-1 text-emerald-950 font-bold"><span className="text-emerald-500 text-xs">✓</span> Unlimited friends</li>
-                          <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> Email &amp; Mass alerts</li>
-                          <li className="flex items-center gap-1 text-emerald-900"><span className="text-emerald-500 text-xs">✓</span> 💼 Customers Bulk Import</li>
-                          <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> Custom design templates</li>
-                        </ul>
+                        <button 
+                          disabled={accountType === "Pro" || isPaymentLoading}
+                          onClick={() => handlePaymentUpgrade("pro")}
+                          className={`w-full py-1.8 mt-4 rounded-xl text-[10px] font-bold transition-all ${
+                            accountType === "Pro" 
+                              ? "bg-indigo-600 text-white cursor-default" 
+                              : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 cursor-pointer"
+                          } ${isPaymentLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                        >
+                          {isPaymentLoading ? "Initializing..." : accountType === "Pro" ? "Active Plan 👑" : "Upgrade to Pro"}
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => {
-                          setAccountType("Business");
-                          const activePrice = userRegion === "Ghana" 
-                            ? (billingCycle === "monthly" ? "GHS 200/mo" : "GHS 1,999/yr")
-                            : userRegion === "USA/Western"
-                              ? (billingCycle === "monthly" ? "$40/mo" : "$399/yr")
-                              : (billingCycle === "monthly" ? "$20/mo" : "$199/yr");
-                          triggerToast("Upgraded to Business Elite 💼", `Bulk importer activated, configured with ${activePrice}.`);
-                          appendLog(`💳 Transaction: Member plan changed to Business Elite (${activePrice}).`);
-                        }}
-                        className={`w-full py-1.8 mt-4 rounded-xl text-[10px] font-bold ${accountType === "Business" ? "bg-emerald-600 text-white cursor-default" : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 cursor-pointer"}`}
-                      >
-                        {accountType === "Business" ? "Active Plan 💼" : "Upgrade Business"}
-                      </button>
+
+                      {/* Business Plan */}
+                      <div className={`p-5 rounded-2xl border flex flex-col justify-between ${accountType === "Business" ? "bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500" : "bg-slate-50 border-slate-200"}`}>
+                        <div>
+                          {accountType === "Business" && <span className="bg-emerald-600 text-white font-black tracking-widest text-[8px] uppercase px-2 py-0.5 rounded-full block w-fit mb-3">Active Now</span>}
+                          <h5 className="font-extrabold text-sm text-slate-900">Business Elite</h5>
+                          <p className="text-[10px] text-slate-500 mt-1">For clubs &amp; retail circles.</p>
+                          <div className="my-3 relative">
+                            <span className="text-xl font-black text-slate-900">
+                              {businessPriceFormatted}
+                            </span>
+                            <span className="text-[10px] text-slate-400">/{billingCycle === "monthly" ? "mo" : "yr"}</span>
+                          </div>
+                          <ul className="text-[10px] space-y-1.5 text-slate-600 font-semibold leading-tight">
+                            <li className="flex items-center gap-1 text-emerald-950 font-bold"><span className="text-emerald-500 text-xs">✓</span> Unlimited friends</li>
+                            <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> Email &amp; Mass alerts</li>
+                            <li className="flex items-center gap-1 text-emerald-900"><span className="text-emerald-500 text-xs">✓</span> 💼 Customers Bulk Import</li>
+                            <li className="flex items-center gap-1"><span className="text-emerald-500 text-xs">✓</span> Custom design templates</li>
+                          </ul>
+                        </div>
+                        <button 
+                          disabled={accountType === "Business" || isPaymentLoading}
+                          onClick={() => handlePaymentUpgrade("business")}
+                          className={`w-full py-1.8 mt-4 rounded-xl text-[10px] font-bold transition-all ${
+                            accountType === "Business" 
+                              ? "bg-emerald-600 text-white cursor-default" 
+                              : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 cursor-pointer"
+                          } ${isPaymentLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                        >
+                          {isPaymentLoading ? "Initializing..." : accountType === "Business" ? "Active Plan 💼" : "Upgrade Business"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
 
                   {/* 💼 BUSINESS BULK BIRTHDAYS IMPORTER SUB CARD */}
                   <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-3 text-left">
@@ -6597,7 +7440,8 @@ return (
 
               </div>
             </div>
-          )}
+            );
+          })()}
 
         </div>
 
@@ -6892,6 +7736,107 @@ return (
                   </div>
                 )}
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* GLOBAL SHARE QR & LINK MODAL */}
+      <AnimatePresence>
+        {isShareModalOpen && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+            {/* Backdrop with elegant blur */}
+            <div 
+              onClick={() => setIsShareModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
+            />
+            
+            {/* Modal Box */}
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 220 }}
+              className="relative bg-white border border-slate-200 rounded-[2.5rem] shadow-2xl max-w-md w-full p-6 md:p-8 text-center z-10 flex flex-col space-y-6"
+              id="hbd-share-card-modal"
+            >
+              {/* Header */}
+              <div className="flex justify-between items-center -mt-2 -mr-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                    <QrCode className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 font-mono">My Handshake Pass</span>
+                </div>
+                <button 
+                  onClick={() => setIsShareModalOpen(false)}
+                  className="p-1 px-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-650 transition cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* QR Image Frame */}
+              <div className="flex flex-col items-center space-y-3.5 bg-gradient-to-br from-slate-900 to-indigo-950 p-6 rounded-[2rem] text-white relative overflow-hidden">
+                <div className="absolute -right-8 -top-8 w-24 h-24 rounded-full bg-indigo-500/10 pointer-events-none blur-xl" />
+                <div className="absolute -left-8 -bottom-8 w-24 h-24 rounded-full bg-teal-500/10 pointer-events-none blur-xl" />
+
+                <div className="bg-white p-2.5 rounded-2xl shadow-lg border border-white/20">
+                  <img 
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(JSON.stringify({
+                      hbd: true,
+                      name: userSession ? userSession.name : "Alex Patel",
+                      birthday: userSession ? userSession.birthday : "1997-06-25",
+                      age: "28",
+                      relationship: "Work Colleague",
+                      phone: userSession && "phone" in userSession ? (userSession as any).phone : "+233241234567",
+                      whatsapp: userSession && "whatsapp" in userSession ? (userSession as any).whatsapp : "+233241234567",
+                      email: userSession ? userSession.email : "alex@example.com",
+                      snapchat: userSession ? userSession.username : "alex_snap",
+                      interests: userSession ? userSession.interests.join(", ") : "Cyberpunk, Mechanic Keyboards",
+                      connectedBack: true
+                    }))}`}
+                    alt="Scan HBD QR Handshake"
+                    className="w-[160px] h-[160px] block"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+
+                <div className="text-center">
+                  <h4 className="text-base font-extrabold text-white tracking-tight">{userSession ? userSession.name : "Alex Patel"}</h4>
+                  <p className="text-xs text-indigo-300 font-medium">@{userSession ? userSession.username : "alex_patel"}</p>
+                </div>
+                <p className="text-[10px] text-slate-300 leading-relaxed font-normal max-w-[280px]">
+                  Point a camera or standard QR scanner here to sync profiles with 🤝 HBD mutual connect parameters instantly!
+                </p>
+              </div>
+
+              {/* Share link input */}
+              <div className="space-y-2 text-left">
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400">Share Link Outside App</label>
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 p-1.5 rounded-2xl">
+                  <div className="flex-1 px-2.5 text-xs text-slate-600 font-mono truncate select-all">
+                    {`${window.location.origin}/?user=${userSession ? userSession.username : "alex"}`}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const username = userSession ? userSession.username : "alex";
+                      const shareUrl = `${window.location.origin}/?user=${username}`;
+                      navigator.clipboard.writeText(shareUrl);
+                      triggerToast("Copied External Link! 🔗", "Ready to share with people outside the app.");
+                    }}
+                    className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-850 text-white p-2.5 rounded-xl transition duration-150 flex items-center gap-1 cursor-pointer text-xs font-black shrink-0"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span className="px-0.5 text-[10px]">Copy</span>
+                  </button>
+                </div>
+                <p className="text-[9.5px] text-slate-400 font-semibold italic text-center">
+                  Let friends easily locate your landing birthday dashboard page.
+                </p>
+              </div>
+
             </motion.div>
           </div>
         )}

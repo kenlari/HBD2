@@ -8,11 +8,21 @@
     <meta name="theme-color" content="#0a0a0f" />
     <link rel="apple-touch-icon" href="/icon-512.png" />
     <script>
+      // Clear and unregister service workers as their cached entries interfere with rapid development updates
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((reg) => console.log('Service Worker registered successfully:', reg.scope))
-            .catch((err) => console.error('Service Worker registration failed:', err));
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (let registration of registrations) {
+            registration.unregister().then((success) => {
+              if (success) console.log('Service Worker unregistered successfully.');
+            });
+          }
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then((names) => {
+          for (let name of names) {
+            caches.delete(name).then(() => console.log('Cache cleared:', name));
+          }
         });
       }
     </script>

@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import subscriptionRouter from "./server/subscriptions";
 
 dotenv.config();
 
@@ -10,6 +11,9 @@ const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
 app.use(express.json());
+
+// Subscription payment integration endpoints
+app.use("/api/subscriptions", subscriptionRouter);
 
 // Lazy-loaded Gemini AI client helper
 let aiClient: GoogleGenAI | null = null;
