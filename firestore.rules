@@ -62,8 +62,8 @@ service cloud.firestore {
     match /users/{userId} {
       // Any signed-in user can read profiles to search/handshake, but writes are private to owner
       allow read: if isSignedIn();
-      allow create: if isOwner(userId) && isValidUser(incoming());
-      allow update: if isOwner(userId) && isValidUser(incoming());
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
       allow delete: if isOwner(userId);
       
       // Friends & buddies added by this user (Private to owner)

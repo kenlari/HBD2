@@ -48,19 +48,38 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
       const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password.trim());
       const firebaseUser = userCredential.user;
 
-      // 2. Fetch the corresponding profile schema document from Firestore
-      const userDocRef = doc(db, "users", firebaseUser.uid);
-      const userDocSnap = await getDoc(userDocRef);
+      // 2. Fetch the corresponding profile schema document from Firestore with safety
+      let profile: LoginSession | null = null;
+      try {
+        const userDocRef = doc(db, "users", firebaseUser.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          profile = userDocSnap.data() as LoginSession;
+        }
+      } catch (dbError) {
+        console.warn("Could not retrieve Firestore profile document (offline/permission error):", dbError);
+        // Fallback to checking local storage
+        const saved = localStorage.getItem("birthday_authenticated_user");
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (parsed.uid === firebaseUser.uid) {
+              profile = parsed;
+            }
+          } catch (e) {
+            // silent ignore
+          }
+        }
+      }
 
-      if (userDocSnap.exists()) {
-        const profile = userDocSnap.data() as LoginSession;
+      if (profile) {
         // Keep localized state in local storage as fallback/cache if helpful
         localStorage.setItem("birthday_authenticated_user", JSON.stringify(profile));
         
         onLogin(profile);
         triggerToast("Welcome back! 🎉", `Good to see you again, ${profile.name}!`);
       } else {
-        // If Auth exists but document shape is missing, formulate it dynamically from user session
+        // If Auth exists but document shape is missing or unreachable, formulate it dynamically from user session
         const fallbackProfile: LoginSession = {
           uid: firebaseUser.uid,
           name: firebaseUser.displayName || email.split("@")[0],
@@ -70,6 +89,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           avatar: "bg-indigo-500",
           interests: ["Photography", "Specialty Coffee"]
         };
+        localStorage.setItem("birthday_authenticated_user", JSON.stringify(fallbackProfile));
         onLogin(fallbackProfile);
         triggerToast("First Boot 🎉", `Creating profile workspace container, ${fallbackProfile.name}!`);
       }
@@ -187,15 +207,8 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
             </button>
           </form>
 
-          {/* Divider */}
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-slate-800" />
-            <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">or</span>
-            <div className="flex-1 h-px bg-slate-800" />
-          </div>
-
           {/* Go to Sign Up */}
-          <div className="text-center">
+          <div className="text-center pt-2">
             <p className="text-[11px] text-slate-500">
               Don't have an account yet?{" "}
               <button

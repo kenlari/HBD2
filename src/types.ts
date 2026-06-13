@@ -30,6 +30,7 @@ export interface Friend {
   whatsapp?: string;
   email?: string;
   connectedBack?: boolean; // Must be true to view their private data
+  incomingRequest?: boolean; // True if friend request is sent TO us and is pending accept
 }
 
 export interface GiftSuggestion {

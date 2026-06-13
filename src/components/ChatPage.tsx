@@ -30,8 +30,8 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   mobileView,
   setMobileView,
 }) => {
-  // We want to exclude "Self" (alex) from the chat partners list
-  const activeChatFriends = friends.filter((f) => f.id !== "alex");
+  // We want to exclude "Self" (alex) from the chat partners list and only show accepted friends
+  const activeChatFriends = friends.filter((f) => f.id !== "alex" && f.connectedBack === true);
   
   const [selectedFriendId, setSelectedFriendId] = useState<string>(() => {
     return activeChatFriends.length > 0 ? activeChatFriends[0].id : "";
@@ -94,7 +94,21 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   });
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const selectedFriend = friends.find((f) => f.id === selectedFriendId) || activeChatFriends[0];
+  const selectedFriend = friends.find((f) => f.id === selectedFriendId) || activeChatFriends[0] || {
+    id: "default",
+    name: "No buddy selected",
+    birthday: "2026-06-03",
+    relationship: "Friend",
+    age: "0",
+    avatar: "bg-[#111b21]",
+    wishlist: [],
+    achievements: [],
+    interests: [],
+    phone: "",
+    whatsapp: "",
+    email: "",
+    snapchat: ""
+  };
 
   useEffect(() => {
     localStorage.setItem("hbd_chat_histories", JSON.stringify(chats));

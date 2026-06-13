@@ -55,7 +55,17 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({ friends }) => 
   const [customPhotoUrl, setCustomPhotoUrl] = useState<string>(PRESET_LOCKET_PHOTOS[3].url);
   const [userUploadedFile, setUserUploadedFile] = useState<string | null>(null);
 
-  const selectedFriend = friends.find((f) => f.id === selectedFriendId) || friends[1];
+  const selectedFriend = friends.find((f) => f.id === selectedFriendId) || friends[0] || {
+    id: "default",
+    name: "No buddy selected",
+    birthday: "2026-06-03",
+    relationship: "Self",
+    age: "0",
+    avatar: "bg-indigo-500",
+    wishlist: [],
+    achievements: [],
+    interests: []
+  };
 
   // Helper to calculate days remaining
   const calculateDaysRemaining = (birthdayStr: string) => {
@@ -112,7 +122,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({ friends }) => 
           <div className="mb-5">
             <label className="block text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wider">Showcase Birthday Of</label>
             <div className="grid grid-cols-2 gap-2">
-              {friends.filter(f => f.id !== 'alex').map((friend) => (
+              {friends.filter(f => f.id !== 'alex' && f.connectedBack === true).map((friend) => (
                 <button
                   key={friend.id}
                   onClick={() => setSelectedFriendId(friend.id)}

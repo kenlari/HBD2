@@ -598,6 +598,7 @@ export default function App() {
           email: email,
           billingCycle: billingCycle, // "monthly" or "annual"
           targetPlan,
+          countryCode: (userSession as any).countryCode || "GH",
         }),
       });
       
@@ -649,24 +650,120 @@ export default function App() {
     });
   };
 
+  // Synchronized synthesizer helper to play custom notification sounds in sandbox or client
+  const playSynthesizedChimeObj = (chimeType: string) => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      if (ctx.state === "suspended") {
+        ctx.resume();
+      }
+
+      const now = ctx.currentTime;
+      
+      if (chimeType === "bell") {
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        const gain2 = ctx.createGain();
+
+        osc1.frequency.setValueAtTime(523.25, now);
+        osc2.frequency.setValueAtTime(783.99, now);
+
+        gain1.gain.setValueAtTime(0.08, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+        gain2.gain.setValueAtTime(0.05, now);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+
+        osc1.connect(gain1);
+        osc2.connect(gain2);
+        gain1.connect(ctx.destination);
+        gain2.connect(ctx.destination);
+
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.8);
+        osc2.stop(now + 0.8);
+      } else if (chimeType === "marimba") {
+        const notes = [523.25, 659.25, 783.99];
+        notes.forEach((freq, index) => {
+          const delay = index * 0.08;
+          const osc = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + delay);
+          
+          gainNode.gain.setValueAtTime(0, now);
+          gainNode.gain.setValueAtTime(0.08, now + delay);
+          gainNode.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.25);
+
+          osc.connect(gainNode);
+          gainNode.connect(ctx.destination);
+
+          osc.start(now + delay);
+          osc.stop(now + delay + 0.25);
+        });
+      } else if (chimeType === "digital") {
+        const osc = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(1400, now + 0.08);
+
+        gainNode.gain.setValueAtTime(0.08, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.12);
+      } else if (chimeType === "sweet") {
+        const notes = [587.33, 880.00];
+        notes.forEach((freq, index) => {
+          const delay = index * 0.1;
+          const osc = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(freq, now + delay);
+
+          gainNode.gain.setValueAtTime(0, now);
+          gainNode.gain.setValueAtTime(0.06, now + delay);
+          gainNode.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.45);
+
+          osc.connect(gainNode);
+          gainNode.connect(ctx.destination);
+
+          osc.start(now + delay);
+          osc.stop(now + delay + 0.45);
+        });
+      } else {
+        const osc = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+
+        osc.frequency.setValueAtTime(880, now);
+        gainNode.gain.setValueAtTime(0.08, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.15);
+      }
+    } catch (e) {
+      console.warn("Chime synthesis played with errors", e);
+    }
+  };
+
   // Helper to trigger selected pre-configured audio chimes
   const playNotificationSound = (force = false) => {
     if (!soundEffectsEnabled && !force) return;
-    const chimeUrls: Record<string, string> = {
-      default: "https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav", // Soft high ping
-      bell: "https://assets.mixkit.co/active_storage/sfx/911/911-84.wav", // Classic bell chime
-      marimba: "https://assets.mixkit.co/active_storage/sfx/1653/1653-84.wav", // Elegant marimba melody
-      digital: "https://assets.mixkit.co/active_storage/sfx/2568/2568-84.wav", // Modern digital synth chime
-      sweet: "https://assets.mixkit.co/active_storage/sfx/2018/2018-84.wav" // Gentle glockenspiel harmony
-    };
-    const audioUrl = chimeUrls[reminderChime] || chimeUrls.default;
-    try {
-      const audioObj = new Audio(audioUrl);
-      audioObj.volume = 0.5;
-      audioObj.play();
-    } catch (e) {
-      console.warn("Chime playback was blocked or failed", e);
-    }
+    playSynthesizedChimeObj(reminderChime);
   };
 
   // AI custom suggestion panel properties
@@ -741,6 +838,7 @@ export default function App() {
   });
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [showContactSimulator, setShowContactSimulator] = useState<boolean>(false);
+  const [showMockList, setShowMockList] = useState<boolean>(false);
   const [isDraggingContactFile, setIsDraggingContactFile] = useState<boolean>(false);
 
   interface SyncedContact {
@@ -1004,7 +1102,7 @@ export default function App() {
       achievements: [],
       phone: sc.phone || "+233241234567",
       email: sc.email || "friend@example.com",
-      connectedBack: false
+      connectedBack: true
     };
 
     setFriends(prev => [...prev, newFriend]);
@@ -1136,6 +1234,14 @@ export default function App() {
               setWalletBalance(data.walletBalance);
             }
           } else {
+            // Check if registration is active in SignUpFlow
+            const signUpInProgress = localStorage.getItem("signup_in_progress") === "true";
+            if (signUpInProgress) {
+              console.log("onAuthStateChanged: Signup/onboarding in progress. Ignoring automatic fallback session setter to let registration finish.");
+              setAuthLoading(false);
+              return;
+            }
+
             // Document missing fallback initialization (prevents desync on cold-boots)
             const fallback = {
               uid: firebaseUser.uid,
@@ -1148,8 +1254,30 @@ export default function App() {
             };
             setUserSession(fallback);
           }
-        } catch (error) {
-          console.error("Firebase auth profile loader error", error);
+        } catch (error: any) {
+          console.log("Firebase auth profile loader (handled gracefully offline):", error?.message || error);
+          // Fallback to localStorage offline safe cache
+          const savedSession = localStorage.getItem("birthday_authenticated_user");
+          if (savedSession) {
+            try {
+              const parsed = JSON.parse(savedSession);
+              if (parsed && parsed.uid === firebaseUser.uid) {
+                setUserSession(parsed);
+                setAuthLoading(false);
+                return;
+              }
+            } catch (jsonErr) {}
+          }
+          // Default transient session shape
+          setUserSession({
+            uid: firebaseUser.uid,
+            name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Offline User",
+            username: firebaseUser.email?.split("@")[0].replace(/[^a-zA-Z0-9]/g, "_") || "offline_user",
+            email: firebaseUser.email || "",
+            birthday: "1997-06-25",
+            avatar: "bg-indigo-500",
+            interests: []
+          });
         }
       } else {
         setUserSession(null);
@@ -1382,7 +1510,21 @@ export default function App() {
     localStorage.setItem("birthday_friends_list", JSON.stringify(friends));
   }, [friends]);
 
-  const selectedFriend = friends.find((f) => f.id === selectedFriendId) || friends[1] || friends[0];
+  const selectedFriend = friends.find((f) => f.id === selectedFriendId) || friends[1] || friends[0] || {
+    id: "default",
+    name: "No buddy selected",
+    birthday: "2026-06-03",
+    relationship: "Self",
+    age: "0",
+    avatar: "bg-indigo-505",
+    wishlist: [],
+    achievements: [],
+    interests: [],
+    phone: "",
+    whatsapp: "",
+    email: "",
+    snapchat: ""
+  };
 
   // Current system mock benchmark clock date: Wednesday June 3, 2026
   const today = new Date("2026-06-03");
@@ -1412,6 +1554,7 @@ export default function App() {
   const getCelebrants = (monthIdx: number, dayNum: number) => {
     return friends.filter(f => {
       if (!f.birthday) return false;
+      if (f.id !== "alex" && f.connectedBack !== true) return false;
       const dateParts = f.birthday.split("-");
       if (dateParts.length < 3) return false;
       const bMonth = parseInt(dateParts[1], 10) - 1; // 0-indexed month
@@ -1421,9 +1564,11 @@ export default function App() {
   };
 
   const getUpcomingSorted = () => {
-    return [...friends].sort((a, b) => {
-      return calculateDaysRemaining(a.birthday) - calculateDaysRemaining(b.birthday);
-    });
+    return [...friends]
+      .filter(f => f.id === "alex" || f.connectedBack === true)
+      .sort((a, b) => {
+        return calculateDaysRemaining(a.birthday) - calculateDaysRemaining(b.birthday);
+      });
   };
 
   // Synchronize AI Form attributes whenever user selects a companion
@@ -1710,6 +1855,7 @@ export default function App() {
         if (f.id === friendId) {
           return {
             ...f,
+            connectedBack: true, // Simulated profile accepting the sent request
             wishlist: mockProf.wishlistToPost
           };
         }
@@ -1729,8 +1875,8 @@ export default function App() {
     const newNotif: InAppNotification = {
       id: `notif-${Date.now()}`,
       type: "birthday_list_posted",
-      title: "🎁 Birthday Wishlist Posted!",
-      message: `${mockProf.name} just published their wishlist. Check out their premium desires and secure slot!`,
+      title: "🤝 Request Accepted!",
+      message: `${mockProf.name} accepted your friend request and published their wishlist! Check out their desires.`,
       friendId: friendId,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isRead: false
@@ -1742,11 +1888,11 @@ export default function App() {
       return next;
     });
 
-    appendLog(`📢 Notification: ${mockProf.name} published their birthday list with ${mockProf.wishlistToPost.length} gift items.`);
+    appendLog(`📢 Notification: ${mockProf.name} accepted friend request and published their birthday list with ${mockProf.wishlistToPost.length} gift items.`);
     triggerToast("Wishlist Posted! 📣", `${mockProf.name} just published their wishlist. Tap to see.`);
   };
 
-  const handleConnectAndSave = (relationshipType: string) => {
+  const handleConnectAndSave = async (relationshipType: string) => {
     if (!pendingConnectProfile) return;
     const profile = pendingConnectProfile;
 
@@ -1762,7 +1908,7 @@ export default function App() {
 
     const nextId = profile.id;
 
-    // Add to friends with empty wishlist
+    // Add to friends as pending (connectedBack: false, incomingRequest: false)
     const newFriend: Friend = {
       id: nextId,
       name: profile.name,
@@ -1775,26 +1921,140 @@ export default function App() {
       achievements: [],
       phone: profile.phone || "+233241234567",
       snapchat: profile.username || "friend_snap",
-      connectedBack: true
+      connectedBack: false,
+      incomingRequest: false
     };
 
     setFriends(prev => [...prev, newFriend]);
-    appendLog(`🤝 Connected: ${profile.name} added (Relation: ${relationshipType})`);
+    appendLog(`🕒 Request Sent: Friend request sent to ${profile.name} (Relation: ${relationshipType})`);
 
-    // Set countdown timer to simulate friend posting list in 12 seconds
-    setPendingPostingTimers(prev => ({
-      ...prev,
-      [nextId]: 12
-    }));
+    // Persist to our own Firestore roster if logged in
+    if (userSession?.uid) {
+      try {
+        await setDoc(doc(db, "users", userSession.uid, "friends", nextId), newFriend, { merge: true });
+      } catch (e) {
+        console.error("Error saving pending friend request to own roster:", e);
+      }
+    }
+
+    // Write real request to recipient if they are a registered user
+    const matchingRealUser = registryUsers.find(r => r.username === profile.username || r.uid === profile.id);
+    const recipientUid = matchingRealUser?.uid;
+
+    if (recipientUid && recipientUid !== userSession?.uid) {
+      try {
+        const outFriendData = {
+          id: userSession.uid,
+          name: userSession.name || "A Co-celebrant",
+          birthday: userSession.birthday || "1997-11-21",
+          relationship: "Registry Connection",
+          age: (userSession as any).age || "25",
+          interests: userSession.interests || ["Gifts", "Parties"],
+          avatar: userSession.avatar || "bg-indigo-600",
+          wishlist: [],
+          achievements: [],
+          phone: (userSession as any).phone || "",
+          connectedBack: false,
+          incomingRequest: true
+        };
+        await setDoc(doc(db, "users", recipientUid, "friends", userSession.uid), outFriendData, { merge: true });
+        
+        // Also add a friendly notification for them
+        await setDoc(doc(db, "users", recipientUid, "notifications", `notif-${Date.now()}`), {
+          id: `notif-${Date.now()}`,
+          type: "system",
+          title: "📥 New Friend Request!",
+          message: `${userSession.name} sent you a buddy request sync!`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isRead: false
+        });
+      } catch (err) {
+        console.error("Error setting multi-directional friend request:", err);
+      }
+    } else {
+      appendLog(`🕒 Sandbox Simulation: Sent request to simulated buddy ${profile.name}. Outstanding accepting token generated.`);
+    }
 
     setShowRelationModal(false);
     setPendingConnectProfile(null);
 
-    // If user is inside the connect view, we want to immediately switch back or let them observe
     triggerToast(
-      "Connection Synced 🤝",
-      `${profile.name} added. Their wishlist schedule trigger will deploy in 12s.`
+      "Request Sent! ✉️",
+      `Friend request sent to ${profile.name}. Pending acceptance.`
     );
+  };
+
+  const handleAcceptFriendRequest = async (f: Friend) => {
+    // 1. Update our local state
+    setFriends(prev => prev.map(p => p.id === f.id ? { ...p, connectedBack: true } : p));
+    
+    // 2. If they are a registered user, update both rosters to accepted!
+    const matchingRealUser = registryUsers.find(r => r.username === f.id || r.uid === f.id);
+    const recipientUid = matchingRealUser?.uid || f.id;
+    if (recipientUid && recipientUid !== "alex" && userSession?.uid) {
+      try {
+        // Update our own friend document in Firestore
+        await setDoc(doc(db, "users", userSession.uid, "friends", recipientUid), {
+          connectedBack: true
+        }, { merge: true });
+
+        // Update recipient's document in Firestore of us
+        await setDoc(doc(db, "users", recipientUid, "friends", userSession.uid), {
+          connectedBack: true
+        }, { merge: true });
+        
+        // Also add a friendly notification for them!
+        await setDoc(doc(db, "users", recipientUid, "notifications", `notif-${Date.now()}`), {
+          id: `notif-${Date.now()}`,
+          type: "system",
+          title: "🤝 Friend Request Accepted!",
+          message: `${userSession.name || "A buddy"} agreed to be friends and is now linked to your circles!`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isRead: false
+        });
+      } catch (e) {
+        console.error("Error setting multi-directional friend agreement:", e);
+      }
+    }
+    
+    triggerToast("Request Accepted 🤝", `You are now connected with ${f.name}!`);
+    appendLog(`🤝 Accepted friend request from ${f.name}`);
+  };
+
+  const handleDeclineFriendRequest = async (f: Friend) => {
+    setFriends(prev => prev.filter(p => p.id !== f.id));
+    
+    // Delete the incoming request from our Firestore as well
+    if (userSession?.uid) {
+      try {
+        await deleteDoc(doc(db, "users", userSession.uid, "friends", f.id));
+      } catch (e) {
+        console.error("Error deleting friend request:", e);
+      }
+    }
+    
+    triggerToast("Request Declined", `Friend request from ${f.name} was declined.`);
+    appendLog(`❌ Declined friend request from ${f.name}`);
+  };
+
+  const handleSimulateAccept = (f: Friend) => {
+    // Determine the simulated registry/profile
+    const mockProf = getSearchableProfiles().find(p => p.id === f.id || p.username === f.snapchat);
+    const wishlistToLoad = mockProf?.wishlistToPost || [];
+
+    setFriends(prev => prev.map(p => {
+      if (p.id === f.id) {
+        return {
+          ...p,
+          connectedBack: true,
+          wishlist: wishlistToLoad
+        };
+      }
+      return p;
+    }));
+
+    triggerToast("Mock Accepted! 🤝", `${f.name} simulated profile has formally accepted your request!`);
+    appendLog(`🤝 Simulation Handshake: ${f.name} accepted your friend request and posted a wishlist of ${wishlistToLoad.length} items.`);
   };
 
   // Timer runner
@@ -1981,6 +2241,7 @@ export default function App() {
   const getFilteredFriends = () => {
     return friends.filter(friend => {
       if (friend.id === "alex") return false;
+      if (friend.connectedBack !== true) return false;
       const matchesSearch = friend.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             friend.interests.some(i => i.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCategory = filterRelationship === "All" || friend.relationship === filterRelationship;
@@ -1993,7 +2254,7 @@ export default function App() {
   const nextTargetDays = nextTarget ? calculateDaysRemaining(nextTarget.birthday) : 0;
 
   // Statistics summaries for executive deck
-  const totalBuddiesCount = friends.filter(f => f.id !== "alex").length;
+  const totalBuddiesCount = friends.filter(f => f.id !== "alex" && f.connectedBack === true).length;
   const claimedWishesCount = friends.reduce((sum, f) => {
     return sum + f.wishlist.filter(w => w.isClaimed).length;
   }, 0);
@@ -2156,7 +2417,7 @@ export default function App() {
               <Users className="w-4 h-4" />
               <span>Buddies</span>
               <span className="ml-auto bg-slate-800 text-[10px] px-2 py-0.5 rounded text-indigo-300 font-mono">
-                {friends.filter(f => f.id !== "alex" && f.connectedBack === false).length || ""}
+                {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length || ""}
               </span>
             </button>
 
@@ -2401,7 +2662,7 @@ export default function App() {
                   </li>
                   <li className="flex items-center gap-2">
                     <span className="text-indigo-500 text-xs">✦</span>
-                    <span>Optional simulated Email delivery sync</span>
+                    <span>Automated Email notifications &amp; briefings</span>
                   </li>
                 </ul>
 
@@ -2707,65 +2968,24 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Preset List */}
-                <div className="overflow-y-auto space-y-2 border border-slate-100 rounded-2xl p-2 bg-slate-50/50 mb-4 max-h-[250px]">
-                  {[
-                    { name: "Benjamin Quansah", phone: "+233246781234", email: "ben@example.com", birthday: "1994-11-12", avatar: "bg-indigo-500" },
-                    { name: "Eunice Mensah", phone: "+233551122334", email: "eunice.m@example.com", birthday: "1997-04-18", avatar: "bg-emerald-500" },
-                    { name: "Kofi Boateng", phone: "+233209876543", email: "kofi@example.com", birthday: "1996-03-02", avatar: "bg-amber-500" },
-                    { name: "Abena Pokua", phone: "+233271239876", email: "abena@hbd.app", birthday: "1999-08-21", avatar: "bg-teal-500" },
-                    { name: "Sena Tsikata", phone: "+233243110984", email: "sena@example.com", birthday: "1995-12-14", avatar: "bg-rose-500" },
-                    { name: "Sylvester Tetteh", phone: "+233544009988", email: "sly@example.com", birthday: "1998-07-06", avatar: "bg-pink-500" },
-                    { name: "Araba Attah", phone: "+233261234567", email: "araba.attah@example.com", birthday: "1997-01-30", avatar: "bg-purple-500" },
-                    { name: "Kwame Nkrumah Jr", phone: "+233241857390", email: "kwame.nk@example.com", birthday: "2000-09-21", avatar: "bg-orange-500" }
-                  ].map((c, i) => {
-                    const isSelected = syncedContacts.some(sc => sc.name === c.name || sc.phone === c.phone);
-                    return (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 shadow-3xs"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span className={`w-8 h-8 rounded-lg text-[10px] text-white font-bold flex items-center justify-center ${c.avatar}`}>
-                            {c.name.split(" ").map(n => n[0] || "").join("")}
-                          </span>
-                          <div>
-                            <span className="text-xs font-bold text-slate-800 block">{c.name}</span>
-                            <span className="text-[10px] text-slate-400 block font-mono">{c.phone} &bull; {c.birthday}</span>
-                          </div>
-                        </div>
-                        {isSelected ? (
-                          <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
-                            Synced
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              handleImportedContacts([{
-                                name: c.name,
-                                phone: c.phone,
-                                email: c.email,
-                                birthday: c.birthday,
-                                avatar: c.avatar,
-                                source: "Address Book Sim"
-                              }]);
-                              setShowContactSimulator(false);
-                            }}
-                            className="text-[9px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1 rounded-md transition-all active:scale-95"
-                          >
-                            Sync Single
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Import All Preset Button */}
-                <div className="flex gap-2 shrink-0">
-                  <button
-                    onClick={() => {
-                      const presetsList = [
+                {/* Preset List option behind button to avoid initial mockups */}
+                {!showMockList ? (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-center shrink-0">
+                    <p className="text-[11px] text-slate-500 mb-2 font-medium">
+                      Need pre-constructed profiles to test? You can load virtual sandbox companions.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowMockList(true)}
+                      className="px-4 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 font-extrabold text-[10px] rounded-lg hover:bg-indigo-110 transition cursor-pointer"
+                    >
+                      💡 Load Sandbox Contact Presets
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="overflow-y-auto space-y-2 border border-slate-100 rounded-2xl p-2 bg-slate-50/50 mb-4 max-h-[160px]">
+                      {[
                         { name: "Benjamin Quansah", phone: "+233246781234", email: "ben@example.com", birthday: "1994-11-12", avatar: "bg-indigo-500" },
                         { name: "Eunice Mensah", phone: "+233551122334", email: "eunice.m@example.com", birthday: "1997-04-18", avatar: "bg-emerald-500" },
                         { name: "Kofi Boateng", phone: "+233209876543", email: "kofi@example.com", birthday: "1996-03-02", avatar: "bg-amber-500" },
@@ -2774,26 +2994,90 @@ export default function App() {
                         { name: "Sylvester Tetteh", phone: "+233544009988", email: "sly@example.com", birthday: "1998-07-06", avatar: "bg-pink-500" },
                         { name: "Araba Attah", phone: "+233261234567", email: "araba.attah@example.com", birthday: "1997-01-30", avatar: "bg-purple-500" },
                         { name: "Kwame Nkrumah Jr", phone: "+233241857390", email: "kwame.nk@example.com", birthday: "2000-09-21", avatar: "bg-orange-500" }
-                      ];
-                      const unselected = presetsList.filter(c => !syncedContacts.some(sc => sc.name === c.name));
-                      if (unselected.length === 0) {
-                        triggerToast("All Presets Synced", "All contacts are already imported into your synced address deck.");
-                        return;
-                      }
-                      const mapped = unselected.map(c => ({
-                        ...c,
-                        source: "Address Book Sim All"
-                      }));
-                      handleImportedContacts(mapped);
-                      setShowContactSimulator(false);
-                    }}
-                    className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all text-center active:scale-95"
-                  >
-                    Sync All Presets
-                  </button>
+                      ].map((c, i) => {
+                        const isSelected = syncedContacts.some(sc => sc.name === c.name || sc.phone === c.phone);
+                        return (
+                          <div
+                            key={i}
+                            className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 shadow-3xs"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className={`w-8 h-8 rounded-lg text-[10px] text-white font-bold flex items-center justify-center ${c.avatar}`}>
+                                {c.name.split(" ").map(n => n[0] || "").join("")}
+                              </span>
+                              <div>
+                                <span className="text-xs font-bold text-slate-800 block">{c.name}</span>
+                                <span className="text-[10px] text-slate-400 block font-mono">{c.phone} &bull; {c.birthday}</span>
+                              </div>
+                            </div>
+                            {isSelected ? (
+                              <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
+                                Synced
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleImportedContacts([{
+                                    name: c.name,
+                                    phone: c.phone,
+                                    email: c.email,
+                                    birthday: c.birthday,
+                                    avatar: c.avatar,
+                                    source: "Address Book Sim"
+                                  }]);
+                                  setShowContactSimulator(false);
+                                }}
+                                className="text-[9px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1 rounded-md transition-all active:scale-95 cursor-pointer"
+                              >
+                                Sync Single
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Import All Preset Button */}
+                    <div className="flex gap-2 shrink-0 mb-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const presetsList = [
+                            { name: "Benjamin Quansah", phone: "+233246781234", email: "ben@example.com", birthday: "1994-11-12", avatar: "bg-indigo-500" },
+                            { name: "Eunice Mensah", phone: "+233551122334", email: "eunice.m@example.com", birthday: "1997-04-18", avatar: "bg-emerald-500" },
+                            { name: "Kofi Boateng", phone: "+233209876543", email: "kofi@example.com", birthday: "1996-03-02", avatar: "bg-amber-500" },
+                            { name: "Abena Pokua", phone: "+233271239876", email: "abena@hbd.app", birthday: "1999-08-21", avatar: "bg-teal-500" },
+                            { name: "Sena Tsikata", phone: "+233243110984", email: "sena@example.com", birthday: "1995-12-14", avatar: "bg-rose-500" },
+                            { name: "Sylvester Tetteh", phone: "+233544009988", email: "sly@example.com", birthday: "1998-07-06", avatar: "bg-pink-500" },
+                            { name: "Araba Attah", phone: "+233261234567", email: "araba.attah@example.com", birthday: "1997-01-30", avatar: "bg-purple-500" },
+                            { name: "Kwame Nkrumah Jr", phone: "+233241857390", email: "kwame.nk@example.com", birthday: "2000-09-21", avatar: "bg-orange-500" }
+                          ];
+                          const unselected = presetsList.filter(c => !syncedContacts.some(sc => sc.name === c.name));
+                          if (unselected.length === 0) {
+                            triggerToast("All Presets Synced", "All contacts are already imported into your synced address deck.");
+                            return;
+                          }
+                          const mapped = unselected.map(c => ({
+                            ...c,
+                            source: "Address Book Sim All"
+                          }));
+                          handleImportedContacts(mapped);
+                          setShowContactSimulator(false);
+                        }}
+                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all text-center active:scale-95 cursor-pointer"
+                      >
+                        Sync All Presets
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                <div className="flex justify-end gap-2 shrink-0">
                   <button
+                    type="button"
                     onClick={() => setShowContactSimulator(false)}
-                    className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl transition-all"
+                    className="py-2 px-6 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl transition-all cursor-pointer"
                   >
                     Close
                   </button>
@@ -3612,9 +3896,9 @@ export default function App() {
 >
   <UserPlus className="w-3 h-3 text-rose-500" />
   <span>Requests</span>
-  {friends.filter(f => f.id !== "alex" && f.connectedBack === false).length > 0 && (
+  {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length > 0 && (
     <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[8px] font-black rounded-full flex items-center justify-center">
-      {friends.filter(f => f.id !== "alex" && f.connectedBack === false).length}
+      {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length}
     </span>
   )}
 </button>
@@ -3720,13 +4004,21 @@ export default function App() {
                                         }`}>
                                           🤝 Linked
                                         </span>
+                                      ) : friend.incomingRequest ? (
+                                        <span className={`text-[9.5px] font-extrabold px-1.5 py-0.2 rounded font-mono shrink-0 flex items-center gap-0.5 ${
+                                          isSel 
+                                            ? "bg-indigo-500/30 text-rose-200" 
+                                            : "bg-rose-50 text-rose-700"
+                                        }`}>
+                                          📥 Request Rec'd
+                                        </span>
                                       ) : (
                                         <span className={`text-[9.5px] font-extrabold px-1.5 py-0.2 rounded font-mono shrink-0 flex items-center gap-0.5 ${
                                           isSel 
                                             ? "bg-indigo-500/30 text-amber-200" 
                                             : "bg-amber-50 text-amber-700"
                                         }`}>
-                                          🔒 Locked
+                                          🕒 Request Sent
                                         </span>
                                       )}
                                     </div>
@@ -4157,44 +4449,95 @@ export default function App() {
                   </motion.div>
                 )}
                 {/* --- TAB C: FRIEND REQUESTS --- */}
-{registrySubTab === "requests" && (
-  <motion.div
-    initial={{ opacity: 0, y: 10 }}
-    animate={{ opacity: 1, y: 0 }}
-    className="space-y-3"
-  >
-    {friends.filter(f => f.id !== "alex" && f.connectedBack === false).length === 0 ? (
-      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
-        <UserPlus className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-        <p className="text-xs font-bold text-slate-500">No pending friend requests</p>
-      </div>
-    ) : (
-      friends.filter(f => f.id !== "alex" && f.connectedBack === false).map(f => (
-        <div key={f.id} className="bg-white rounded-2xl border border-indigo-100 p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className={`w-10 h-10 rounded-xl ${f.avatar} text-white flex items-center justify-center font-bold text-sm`}>
-              {f.name.split(" ").map(n => n[0]).join("")}
-            </span>
-            <div>
-              <span className="text-sm font-bold text-slate-800 block">{f.name}</span>
-              <span className="text-[10px] text-slate-400">{f.relationship}</span>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setFriends(prev => prev.map(p => p.id === f.id ? {...p, connectedBack: true} : p))}
-              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
-            >Accept</button>
-            <button
-              onClick={() => setFriends(prev => prev.filter(p => p.id !== f.id))}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-600 text-xs font-bold rounded-xl cursor-pointer"
-            >Decline</button>
-          </div>
-        </div>
-      ))
-    )}
-  </motion.div>
-)}
+                {registrySubTab === "requests" && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-6"
+                  >
+                    {/* INCOMING REQUESTS SECTION */}
+                    <div className="space-y-3">
+                      <h4 className="text-[11px] font-black uppercase text-slate-400 tracking-wider">Inbox (Received Requests)</h4>
+                      {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length === 0 ? (
+                        <div className="bg-slate-50/55 rounded-2xl border border-dashed border-slate-205 p-6 text-center">
+                          <p className="text-xs font-semibold text-slate-400">No incoming friendship requests</p>
+                        </div>
+                      ) : (
+                        friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).map(f => (
+                          <div key={f.id} className="bg-white rounded-2xl border border-indigo-100 p-4 flex items-center justify-between shadow-xs">
+                            <div className="flex items-center gap-3">
+                              <span className={`w-10 h-10 rounded-xl ${f.avatar} text-white flex items-center justify-center font-bold text-sm`}>
+                                {f.name.split(" ").map(n => n[0]).join("")}
+                              </span>
+                              <div>
+                                <span className="text-sm font-bold text-slate-800 block">{f.name}</span>
+                                <span className="text-[10px] text-slate-400">{f.relationship}</span>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleAcceptFriendRequest(f)}
+                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+                              >Accept</button>
+                              <button
+                                onClick={() => handleDeclineFriendRequest(f)}
+                                className="px-3 py-1.5 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-600 text-xs font-bold rounded-xl cursor-pointer"
+                              >Decline</button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* OUTGOING REQUESTS SECTION */}
+                    <div className="space-y-3 pt-2 border-t border-slate-100">
+                      <h4 className="text-[11px] font-black uppercase text-slate-400 tracking-wider">Sent (Pending Acceptance)</h4>
+                      {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === false).length === 0 ? (
+                        <div className="bg-slate-50/55 rounded-2xl border border-dashed border-slate-205 p-6 text-center">
+                          <p className="text-xs font-semibold text-slate-400">No pending sent invitations</p>
+                        </div>
+                      ) : (
+                        friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === false).map(f => {
+                          const matchingRealUser = registryUsers.find(r => r.username === f.snapchat || r.uid === f.id);
+                          const isSimulated = !matchingRealUser; // If they are not registered in Firestore, they are a mockup sandbox profile!
+                          
+                          return (
+                            <div key={f.id} className="bg-white rounded-2xl border border-slate-100 p-4 flex items-center justify-between shadow-xs">
+                              <div className="flex items-center gap-3">
+                                <span className={`w-10 h-10 rounded-xl ${f.avatar} text-white flex items-center justify-center font-bold text-sm`}>
+                                  {f.name.split(" ").map(n => n[0]).join("")}
+                                </span>
+                                <div>
+                                  <span className="text-sm font-bold text-slate-800 block">{f.name}</span>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="text-[9.5px] text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded-lg">🕒 Request Sent</span>
+                                    {isSimulated && (
+                                      <span className="text-[8.5px] text-slate-400 font-bold bg-slate-100 px-1.5 py-0.5 rounded-lg uppercase tracking-wide">Offline Simulation</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                {isSimulated ? (
+                                  <button
+                                    onClick={() => handleSimulateAccept(f)}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10.5px] font-bold rounded-xl cursor-pointer flex items-center gap-1 shadow-xs transition"
+                                  >
+                                    <span>Simulate Accept 🤝</span>
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] font-bold bg-slate-50 border border-slate-150 px-2.5 py-1.5 rounded-xl text-slate-400 select-none">
+                                    Awaiting User...
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </motion.div>
+                )}
 
               </div>
 
@@ -6348,17 +6691,8 @@ export default function App() {
                               const selected = e.target.value;
                               setReminderChime(selected);
                               // Preview sound selection immediately
-                              const chimeUrls: Record<string, string> = {
-                                default: "https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav",
-                                bell: "https://assets.mixkit.co/active_storage/sfx/911/911-84.wav",
-                                marimba: "https://assets.mixkit.co/active_storage/sfx/1653/1653-84.wav",
-                                digital: "https://assets.mixkit.co/active_storage/sfx/2568/2568-84.wav",
-                                sweet: "https://assets.mixkit.co/active_storage/sfx/2018/2018-84.wav"
-                              };
                               try {
-                                const audioObj = new Audio(chimeUrls[selected]);
-                                audioObj.volume = 0.5;
-                                audioObj.play();
+                                playSynthesizedChimeObj(selected);
                               } catch(err){}
                             }}
                             className="w-full bg-white border border-slate-200 rounded-2xl px-3 py-2 text-xs font-semibold text-slate-900 outline-none focus:border-indigo-500 cursor-pointer mt-1"
@@ -7416,16 +7750,16 @@ export default function App() {
                             }
                             triggerToast(
                               val ? "Email Alerts Enabled 📧" : "Email Alerts Disabled 🔇", 
-                              val ? "Warnings will simulate sending email reminders 7 days and 1 day prior." : "Alerts will remain strictly sandbox in-app notifications."
+                              val ? "Warnings are active and will record under notification archives 7 days and 1 day prior." : "Alerts will remain strictly in-app desktop notifications."
                             );
                             appendLog(`⚙️ Config: Email alert warning dispatcher is set to ${val ? "active" : "inactive"}.`);
                           }}
                           className="indigo-checkbox w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 mt-0.5 cursor-pointer"
                         />
                         <div>
-                          <span className="text-xs font-black text-slate-900 block leading-tight">Enable Simulated Email Reminders</span>
+                          <span className="text-xs font-black text-slate-900 block leading-tight">Enable Roster Email Alerts &amp; Briefings</span>
                           <span className="text-[10px] text-slate-500 mt-1 leading-relaxed block">
-                            Once enabled, a copy of 7-day warning alerts and 1-day warnings we parse on load will simulate delivery to <strong>{userSession?.email || "thefitfola@gmail.com"}</strong>.
+                            Once enabled, a digest of 7-day warnings and 1-day warnings will be compiled for your registered buddies and sent to <strong>{userSession?.email || "thefitfola@gmail.com"}</strong>.
                           </span>
                         </div>
                       </label>
@@ -7434,7 +7768,7 @@ export default function App() {
 
                   {/* Operational Status overview */}
                   <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl text-[10.5px] text-slate-550 leading-relaxed font-semibold">
-                    💡 <strong>Simulate Warnings:</strong> When you modify settings or register others, the load checker triggers alerts automatically. Open your notification drawer in the top right header navigation bar to inspect active alerting logs.
+                    💡 <strong>Active Warnings:</strong> When you modify settings or register others, the load checker triggers alerts automatically. Open your notification drawer in the top right header navigation bar to inspect active alerting logs and historical dispatch archives.
                   </div>
                 </div>
 
@@ -7475,9 +7809,9 @@ export default function App() {
         >
                     <Users className="w-4.5 h-4.5 mb-0.5" />
           <span className="text-[9px] font-bold tracking-tight">Buddies</span>
-          {friends.filter(f => f.id !== "alex" && f.connectedBack === false).length > 0 && (
+          {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length > 0 && (
             <span className="absolute top-1 right-3.5 bg-rose-600 text-[8px] px-1 rounded text-white font-mono font-bold scale-75 border border-slate-700/60">
-              {friends.filter(f => f.id !== "alex" && f.connectedBack === false).length}
+              {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length}
             </span>
           )}
 

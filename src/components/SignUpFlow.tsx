@@ -9,9 +9,7 @@ import { auth, db } from "../firebase";
 import { 
   createUserWithEmailAndPassword, 
   sendEmailVerification,
-  sendSignInLinkToEmail,
-  isSignInWithEmailLink,
-  signInWithEmailLink
+  updatePassword
 } from "firebase/auth";
 import { doc, setDoc, query, collection, where, getDocs } from "firebase/firestore";
 
@@ -148,9 +146,6 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
   const [usernameError, setUsernameError] = useState("");
 
-  // OTP Verification States (Awaiting Link Validation)
-  const [showOtpInput, setShowOtpInput] = useState(false);
-
   const [birthday, setBirthday] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -162,39 +157,22 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   const [isCountryDropdownOpen, setIsCountryDropdownOpen] = useState(false);
   const [countrySearchQuery, setCountrySearchQuery] = useState("");
   const [rawPhone, setRawPhone] = useState("");
+  const [isCompleting, setIsCompleting] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Mark signup session as active to prevent App.tsx premature redirects
+  useEffect(() => {
+    localStorage.setItem("signup_in_progress", "true");
+    return () => {
+      localStorage.removeItem("signup_in_progress");
+    };
+  }, []);
 
   // Focus effect
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 350);
   }, [step]);
-
-  // Listen for Passwordless Auth Callback
-  useEffect(() => {
-    if (isSignInWithEmailLink(auth, window.location.href)) {
-      const storedEmail = window.localStorage.getItem('emailForSignIn') || email;
-      if (!storedEmail) {
-        console.warn("No stored email for passwordless verification link found.");
-        return;
-      }
-      
-      triggerToast("Verifying Link... ⌛", "Connecting to secure authentication services.");
-      
-      signInWithEmailLink(auth, storedEmail, window.location.href)
-        .then(() => {
-          window.localStorage.removeItem('emailForSignIn');
-          triggerToast("Email Verified! ✅", "Credentials verified successfully via action link.");
-          setShowOtpInput(false);
-          setEmail(storedEmail);
-          setStep(3); // Dynanically advances user to step 3 (birthday)
-        })
-        .catch((error) => {
-          console.error("Firebase signInWithEmailLink error:", error);
-          triggerToast("Verification Failed ❌", "Link may be expired, already used, or opened on another browser. Please try again.");
-        });
-    }
-  }, []);
 
   const go = (next: number) => {
     setDirection(next > step ? 1 : -1);
@@ -240,33 +218,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
     }
   };
 
-  // Triggers official Firebase Passwordless Action Link to user inbox
-  const handleSendEmailLink = async () => {
-    const trimmedEmail = email.trim();
-    if (!validateEmail(trimmedEmail)) {
-      triggerToast("Invalid Email format ❌", "Enter a correct email address format.");
-      return;
-    }
-    
-    try {
-      const actionCodeSettings = {
-        url: window.location.href, // Link redirection target
-        handleCodeInApp: true,
-      };
-      
-      await sendSignInLinkToEmail(auth, trimmedEmail, actionCodeSettings);
-      window.localStorage.setItem('emailForSignIn', trimmedEmail);
-      
-      setShowOtpInput(true);
-      triggerToast("Verification Link Sent! ✉️", `We sent a secure action verification link to ${trimmedEmail}`);
-    } catch (err: any) {
-      console.error("sendSignInLinkToEmail error", err);
-      // Offline staging fallback wrapper
-      window.localStorage.setItem('emailForSignIn', trimmedEmail);
-      setShowOtpInput(true);
-      triggerToast("Sandbox Verification Sent! ✉️", `Local staging link simulation queued to ${trimmedEmail}`);
-    }
-  };
+
 
   const handleSelectCountry = (c: typeof COUNTRIES[0]) => {
     setSelectedCountryCode(c.code);
@@ -289,11 +241,15 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   };
 
   const handleComplete = async () => {
+    setIsCompleting(true);
     // Collect country, digits, and fallback options upfront
     const selectedCountry = COUNTRIES.find(c => c.code === selectedCountryCode) || COUNTRIES[0];
     const cleanPhoneDigits = rawPhone.replace(/\D/g, '').replace(/^0+/, '');
     const formattedPhone = `${selectedCountry.dialCode}${cleanPhoneDigits}`;
-    const fallbackUid = "local_" + Math.random().toString(36).substring(2, 11);
+    
+    // Check if we are already authenticated via passwordless email link
+    const currentFirebaseUser = auth.currentUser;
+    const fallbackUid = currentFirebaseUser?.uid || "local_" + Math.random().toString(36).substring(2, 11);
     let uid = fallbackUid;
 
     // Pre-construct SignUpSession object
@@ -314,17 +270,33 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
 
     // Resilient try-catch to resolve the final "Let's Go!" layout freezing
     try {
-      // 1. Attempts real Firebase Auth account initialization
+      // 1. Attempts real Firebase Auth account initialization / synchronization
       try {
-        const userCredential = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password.trim());
-        uid = userCredential.user.uid;
-        session.uid = uid; // override fallback ID
-        
-        // Quiet non-blocking verification email check
-        try {
-          await sendEmailVerification(userCredential.user);
-        } catch (vErr) {
-          console.warn("sendEmailVerification silent skipped:", vErr);
+        if (currentFirebaseUser && currentFirebaseUser.email?.toLowerCase() === email.trim().toLowerCase()) {
+          // If the email matches the verified active session, do not recreate the user (this causes email-already-in-use errors)
+          uid = currentFirebaseUser.uid;
+          session.uid = uid;
+          
+          // Optionally associate/link the password they filled in Step 5 for future logins
+          if (password.trim().length >= 6) {
+            try {
+              await updatePassword(currentFirebaseUser, password.trim());
+            } catch (passwordUpdateErr) {
+              console.warn("Silent non-blocking password update on current linked user bypassed:", passwordUpdateErr);
+            }
+          }
+        } else {
+          // Standard traditional email + password user registration
+          const userCredential = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password.trim());
+          uid = userCredential.user.uid;
+          session.uid = uid; // override fallback ID
+          
+          // Quiet non-blocking verification email check
+          try {
+            await sendEmailVerification(userCredential.user);
+          } catch (vErr) {
+            console.warn("sendEmailVerification silent skipped:", vErr);
+          }
         }
       } catch (authErr: any) {
         console.warn("Firebase Auth bypassed or returned offline. Recovering with offline credentials:", authErr);
@@ -341,16 +313,20 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
         console.warn("Firestore database save bypassed offline or permission issue:", dbErr);
       }
 
-      // 3. Persist credentials locally
+      // 3. Persist credentials locally and clear registration flag
+      localStorage.removeItem("signup_in_progress");
       localStorage.setItem("birthday_authenticated_user", JSON.stringify(session));
       
       // 4. Force onComplete to trigger state changes instantly
+      setIsCompleting(false);
       onComplete(session);
       triggerToast("Welcome to HBD! 🥳", "Your secure cloud profile is synchronized and active.");
     } catch (err: any) {
       console.error("Resilient completion fallback triggered:", err);
       // Guarantee transition is absolute, never blocks the screen
+      localStorage.removeItem("signup_in_progress");
       localStorage.setItem("birthday_authenticated_user", JSON.stringify(session));
+      setIsCompleting(false);
       onComplete(session);
       triggerToast("Welcome to HBD! 🥳", "Proceeding into workspace dashboard.");
     }
@@ -453,79 +429,32 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       onNext: handleUsernameNext,
     },
 
-    // STEP 2 — Email (Passwordless Link flow replacing 6-digit OTP code)
+    // STEP 2 — Email
     {
       icon: <Mail className="w-6 h-6" />,
       emoji: "✉️",
-      title: !showOtpInput ? "What's your email?" : "Verify your Email",
-      subtitle: !showOtpInput
-        ? "This is crucial to secure your workspace account."
-        : "We've sent a secure action link to verify your identity.",
-      content: !showOtpInput ? (
+      title: "What's your email?",
+      subtitle: "This is crucial to secure your workspace account.",
+      content: (
         <div className="space-y-3">
           <input
             ref={inputRef}
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
-            onKeyDown={async (e) => {
+            onKeyDown={(e) => {
               if (e.key === "Enter" && validateEmail(email)) {
-                await handleSendEmailLink();
+                go(3);
               }
             }}
             placeholder="name@example.com"
             className="w-full bg-slate-900 border border-white/10 text-white text-lg font-semibold rounded-2xl px-5 py-4 outline-none focus:border-indigo-400 focus:bg-slate-800 transition-all placeholder:text-white/20 font-mono"
           />
-          <p className="text-xs text-white/40 px-1 text-left">We will send a secure verification email to complete sign up.</p>
-        </div>
-      ) : (
-        <div className="space-y-4 text-left">
-          <div className="text-center bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-4 mb-2 flex flex-col items-center gap-3">
-            <div className="w-10 h-10 rounded-full border-t-2 border-indigo-500 animate-spin" />
-            <div>
-              <span className="text-xs text-indigo-300 font-bold block">Verifying secure link...</span>
-              <p className="text-xs text-white/50 mt-1 max-w-[240px] mx-auto leading-relaxed">
-                We sent a secure action link to <span className="text-indigo-400 font-mono">{email}</span>. Click the verification target to continue.
-              </p>
-            </div>
-          </div>
-          
-          {/* Simulation option for staging environments without real mailbox ingress */}
-          <div className="p-3 bg-slate-950 border border-white/5 rounded-xl flex flex-col gap-1.5 text-center mt-2">
-            <span className="text-[10px] text-white/40 block">Sandbox Testing Bypass Mode</span>
-            <button
-              key="sandbox_bypass_btn"
-              type="button"
-              onClick={() => {
-                triggerToast("Simulating Link verified! 🔑", "Successfully skipped verification in Sandbox.");
-                go(3);
-              }}
-              className="px-3 py-1.5 text-xs bg-indigo-600/20 border border-indigo-500/30 hover:bg-indigo-600/30 text-indigo-300 font-bold rounded-lg cursor-pointer transition-all active:scale-95"
-            >
-              Simulate Email Link Match & Continue
-            </button>
-          </div>
-
-          <div className="flex justify-between items-center px-1 font-mono">
-            <p className="text-[10px] text-white/40">Waiting for browser callback...</p>
-            <button
-              type="button"
-              onClick={handleSendEmailLink}
-              className="text-xs text-indigo-400 font-black hover:underline cursor-pointer"
-            >
-              Resend Link
-            </button>
-          </div>
+          <p className="text-xs text-white/40 px-1 text-left">We will secure your account with standard email credentials.</p>
         </div>
       ),
-      canNext: !showOtpInput ? validateEmail(email) : true,
-      onNext: async () => {
-        if (!showOtpInput) {
-          await handleSendEmailLink();
-        } else {
-          go(3); // Wait check bypass
-        }
-      },
+      canNext: validateEmail(email),
+      onNext: () => go(3),
     },
 
     // STEP 3 — Birthday
@@ -702,7 +631,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       icon: <Heart className="w-6 h-6" />,
       emoji: "✨",
       title: "What are you into?",
-      subtitle: "Pick at least 3. This powers AI gift suggestions.",
+      subtitle: "Optional — pick any of these topics to power personalized AI gift ideas.",
       content: (
         <div className="flex flex-wrap gap-2 max-h-56 overflow-y-auto pr-1">
           {INTEREST_OPTIONS.map(({ label, emoji }) => {
@@ -726,7 +655,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
           })}
         </div>
       ),
-      canNext: interests.length >= 3,
+      canNext: true,
       onNext: handleComplete,
       nextLabel: "Let's go! 🎉",
     },
@@ -807,14 +736,19 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
                 <button
                   type="button"
                   onClick={current.onNext}
-                  disabled={!current.canNext}
+                  disabled={!current.canNext || isCompleting}
                   className={`flex-1 py-3.5 rounded-xl text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    current.canNext
+                    current.canNext && !isCompleting
                       ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/50 active:scale-95"
                       : "bg-white/5 text-white/20 cursor-not-allowed border border-white/5"
                   }`}
                 >
-                  {"nextLabel" in current && current.nextLabel ? (
+                  {isCompleting ? (
+                    <div className="flex items-center gap-2 justify-center">
+                      <div className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                      <span>Creating Profile...</span>
+                    </div>
+                  ) : "nextLabel" in current && current.nextLabel ? (
                     current.nextLabel
                   ) : (
                     <>
