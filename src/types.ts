@@ -69,6 +69,7 @@ export interface SentGift {
   message: string;
   dateSent: string;
   revealDate?: string;
+  isOpened?: boolean;
 }
 
 

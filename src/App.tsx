@@ -64,6 +64,7 @@ import { LoginPage } from "./components/LoginPage";
 import { BirthdayDashboard } from "./components/BirthdayDashboard";
 import { SignUpFlow } from "./components/SignUpFlow";
 import { ChatPage } from "./components/ChatPage";
+import { ConfettiBurst } from "./components/ConfettiBurst";
 
 interface StoreGiftItem {
   id: string;
@@ -362,7 +363,12 @@ export default function App() {
   const [giftRecipientMessage, setGiftRecipientMessage] = useState<string>("");
   const [giftPaymentMethod, setGiftPaymentMethod] = useState<"momo" | "card" | "points">("momo");
   const [isGiftProcessing, setIsGiftProcessing] = useState<boolean>(false);
-  const [giftProcessingStep, setGiftProcessingStep] = useState<string>("");
+  const [giftProcessingStep, setGiftProcessingStep] = useState<string>( "");
+
+  // Shake & Confetti premium interactions
+  const [shakingGiftId, setShakingGiftId] = useState<string | null>(null);
+  const [activeConfettiGiftId, setActiveConfettiGiftId] = useState<string | null>(null);
+  const [showPurchaseConfetti, setShowPurchaseConfetti] = useState<boolean>(false);
 
   const [walletBalance, setWalletBalance] = useState<number>(() => {
     const saved = localStorage.getItem("hbd_wallet_balance");
@@ -765,6 +771,23 @@ export default function App() {
   const playNotificationSound = (force = false) => {
     if (!soundEffectsEnabled && !force) return;
     playSynthesizedChimeObj(reminderChime);
+  };
+
+  // Helper to trigger opening/unwrapping interactive gifts
+  const handleOpenGift = (giftId: string) => {
+    if (shakingGiftId) return; // Prevent double trigger
+    
+    setShakingGiftId(giftId);
+    playNotificationSound(); // Play lovely dispatch chime
+    
+    setTimeout(() => {
+      setShakingGiftId(null);
+      setActiveConfettiGiftId(giftId);
+      
+      setSentGifts((prev) => 
+        prev.map((g) => (g.id === giftId ? { ...g, isOpened: true } : g))
+      );
+    }, 620);
   };
 
   // AI custom suggestion panel properties
@@ -1419,7 +1442,7 @@ export default function App() {
 
   // State-to-Cloud Auto-Synchronizer Engine (Dirty State Interceptors)
   useEffect(() => {
-    if (!userSession?.uid) return;
+    if (!userSession?.uid || !auth.currentUser) return;
     if (isSyncingFromFirestoreRef.current) return;
 
     const syncWork = async () => {
@@ -1442,13 +1465,6 @@ export default function App() {
         
         try {
           await setDoc(doc(db, "users", userSession.uid, "friends", friend.id), friend, { merge: true });
-
-          const matchingRealUser = registryUsers.find(r => r.username === friend.id || r.uid === friend.id);
-          if (matchingRealUser) {
-            await setDoc(doc(db, "users", matchingRealUser.uid), {
-              wishlist: friend.wishlist || []
-            }, { merge: true });
-          }
         } catch (e) { console.error(e); }
       }
     };
@@ -1458,7 +1474,7 @@ export default function App() {
 
   // Sync Sent Gift Logs to Cloud
   useEffect(() => {
-    if (!userSession?.uid) return;
+    if (!userSession?.uid || !auth.currentUser) return;
     if (isSyncingFromFirestoreRef.current) return;
 
     const syncGifts = async () => {
@@ -1487,7 +1503,7 @@ export default function App() {
 
   // Sync In-App Alert Notifications to Cloud
   useEffect(() => {
-    if (!userSession?.uid) return;
+    if (!userSession?.uid || !auth.currentUser) return;
     if (isSyncingFromFirestoreRef.current) return;
 
     const syncNotifs = async () => {
@@ -1516,7 +1532,7 @@ export default function App() {
 
   // Sync User Profile Preferences & Wallet balances
   useEffect(() => {
-    if (!userSession?.uid) return;
+    if (!userSession?.uid || !auth.currentUser) return;
     if (isSyncingFromFirestoreRef.current) return;
 
     const syncProfileMeta = async () => {
@@ -4904,33 +4920,82 @@ export default function App() {
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-1">
                             {sentGifts
                               .filter(g => g.friendId === selectedFriend.id)
-                              .map(gift => (
-                                <div 
-                                  key={gift.id}
-                                  className="bg-[#FFFDFD] hover:bg-[#FFF9F9] border border-rose-100/85 hover:border-rose-200 p-3 rounded-2xl text-left flex flex-col justify-between gap-2.5 transition relative overflow-hidden"
-                                >
-                                  <div className="flex items-start gap-2">
-                                    <span className="text-2xl mt-0.5 shrink-0">
-                                      {gift.giftType === "rose" && "🌹"}
-                                      {gift.giftType === "bouquet" && "💐"}
-                                      {gift.giftType === "money" && "💰"}
-                                    </span>
-                                    <div className="min-w-0">
-                                      <h5 className="font-extrabold text-xs text-slate-900 truncate">{gift.giftName}</h5>
-                                      <span className="text-[10px] text-emerald-600 font-mono font-black block">{gift.price} • Delivered</span>
+                              .map(gift => {
+                                const isUnopened = gift.isOpened === false;
+                                if (isUnopened) {
+                                  return (
+                                    <motion.div 
+                                      key={gift.id}
+                                      onClick={() => handleOpenGift(gift.id)}
+                                      animate={{
+                                        x: shakingGiftId === gift.id ? [0, -6, 6, -6, 6, -3, 3, -1, 1, 0] : 0,
+                                        scale: shakingGiftId === gift.id ? 1.03 : 1,
+                                      }}
+                                      whileHover={{ scale: shakingGiftId === gift.id ? 1.03 : 1.02 }}
+                                      whileTap={{ scale: 0.98 }}
+                                      transition={{ duration: 0.5 }}
+                                      className="bg-gradient-to-br from-rose-50 to-indigo-50/50 hover:from-rose-100/80 hover:to-indigo-100/40 border border-rose-200/60 p-3.5 rounded-2xl text-left flex flex-col justify-between gap-3 transition-colors relative overflow-hidden shadow-2xs cursor-pointer group"
+                                    >
+                                      {/* Target Confetti Burst inside this card */}
+                                      <ConfettiBurst active={activeConfettiGiftId === gift.id} onComplete={() => setActiveConfettiGiftId(null)} count={35} />
+
+                                      <div className="absolute top-0 right-0 w-16 h-16 bg-rose-200/20 rounded-bl-full pointer-events-none -mr-4 -mt-4 group-hover:scale-110 transition-transform" />
+
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-3xl shrink-0 animate-bounce" style={{ animationDuration: "2s" }}>
+                                          🎁
+                                        </span>
+                                        <div>
+                                          <h5 className="font-extrabold text-xs text-slate-800">Unopened Celebration Present</h5>
+                                          <span className="text-[10px] text-rose-600 font-extrabold tracking-tight block mt-0.5">Dispatched securely on: {gift.dateSent}</span>
+                                        </div>
+                                      </div>
+
+                                      <div className="bg-white p-2 text-center rounded-xl border border-rose-100/40 text-[10px] font-black text-indigo-600 hover:text-rose-600 uppercase tracking-wider transition-colors">
+                                        ✨ Click to Tap & Unwrap SURPRISE! ✨
+                                      </div>
+
+                                      <div className="flex justify-between items-center text-[9px] font-mono text-slate-400">
+                                        <span>Status: Sealed Locker</span>
+                                        <span className="text-indigo-600 font-bold uppercase tracking-wider">● Unwrap Me</span>
+                                      </div>
+                                    </motion.div>
+                                  );
+                                }
+
+                                return (
+                                  <motion.div 
+                                    key={gift.id}
+                                    initial={{ opacity: 0, scale: 0.94 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    transition={{ duration: 0.4 }}
+                                    className="bg-[#FFFDFD] hover:bg-[#FFF9F9] border border-rose-100/85 hover:border-rose-200 p-3 rounded-2xl text-left flex flex-col justify-between gap-2.5 transition relative overflow-hidden"
+                                  >
+                                    <ConfettiBurst active={activeConfettiGiftId === gift.id} onComplete={() => setActiveConfettiGiftId(null)} count={30} />
+
+                                    <div className="flex items-start gap-2">
+                                      <span className="text-2xl mt-0.5 shrink-0">
+                                        {gift.giftType === "rose" && "🌹"}
+                                        {gift.giftType === "bouquet" && "💐"}
+                                        {gift.giftType === "money" && "💰"}
+                                      </span>
+                                      <div className="min-w-0">
+                                        <h5 className="font-extrabold text-xs text-slate-900 truncate">{gift.giftName}</h5>
+                                        <span className="text-[10px] text-emerald-600 font-mono font-black block">{gift.price} • Opened</span>
+                                      </div>
                                     </div>
-                                  </div>
 
-                                  <div className="bg-slate-50 p-1.5 rounded-lg text-[10.5px] italic text-slate-600 leading-snug border border-slate-100/50 line-clamp-2">
-                                    "{gift.message}"
-                                  </div>
+                                    <div className="bg-slate-50 p-1.5 rounded-lg text-[10.5px] italic text-slate-600 leading-snug border border-slate-100/50 line-clamp-2">
+                                      "{gift.message}"
+                                    </div>
 
-                                  <div className="flex justify-between items-center text-[9px] font-mono text-slate-400 pt-1 border-t border-rose-100/40">
-                                    <span>Sent: {gift.dateSent}</span>
-                                    <span className="text-emerald-500 font-bold uppercase tracking-wider">● Secure Locker</span>
-                                  </div>
-                                </div>
-                              ))}
+                                    <div className="flex justify-between items-center text-[9px] font-mono text-slate-400 pt-1 border-t border-rose-100/40">
+                                      <span>Sent: {gift.dateSent}</span>
+                                      <span className="text-emerald-500 font-bold uppercase tracking-wider">● Unwrapped</span>
+                                    </div>
+                                  </motion.div>
+                                );
+                              })}
                           </div>
                         )}
                       </div>
@@ -6856,7 +6921,8 @@ export default function App() {
 
           {/* ==================== SCREEN 7.5: IN-APP GIFT STORE ==================== */}
           {activeSection === "gift-store" && (
-            <div className="space-y-6 text-left animate-fade-in" id="view-gift-store-hull">
+            <div className="space-y-6 text-left animate-fade-in relative" id="view-gift-store-hull">
+              <ConfettiBurst active={showPurchaseConfetti} mode="rain" onComplete={() => setShowPurchaseConfetti(false)} />
               {/* My Wallet Card */}
               <div className="bg-white border border-slate-200 rounded-[2rem] p-6 md:p-8 shadow-sm text-left relative overflow-hidden transition-all duration-300 hover:shadow-md" id="wallet-card-container">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -7021,7 +7087,13 @@ export default function App() {
                   {/* Grid layout */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {GIFT_INVENTORY.map((item) => (
-                      <div key={item.id} className="bg-white border border-rose-100 hover:border-rose-300 shadow-xs p-6 rounded-[2rem] flex flex-col justify-between transition-all group hover:shadow-lg hover:-translate-y-1 relative overflow-hidden text-left">
+                      <motion.div
+                        key={item.id}
+                        whileHover={{ scale: 1.02, y: -4 }}
+                        whileTap={{ scale: 0.98 }}
+                        transition={{ type: "spring", stiffness: 350, damping: 20 }}
+                        className="bg-white border border-rose-100 hover:border-rose-300 shadow-xs p-6 rounded-[2rem] flex flex-col justify-between transition-all group hover:shadow-lg relative overflow-hidden text-left cursor-pointer"
+                      >
                         <div className="absolute top-0 right-0 w-24 h-24 bg-rose-50/50 rounded-bl-full pointer-events-none -mr-4 -mt-4 transition-colors group-hover:bg-rose-100/30" />
                         <div className="space-y-4">
                           <div className="flex justify-between items-start">
@@ -7080,7 +7152,7 @@ export default function App() {
                             Send {item.emoji}
                           </button>
                         </div>
-                      </div>
+                      </motion.div>
                     ))}
                   </div>
 
@@ -7366,6 +7438,7 @@ export default function App() {
 
                                 const formattedPriceString = getFormattedPrice(customGiftStoreItem.usdPrice);
                                 const newGiftLog: SentGift = {
+                                  isOpened: false,
                                   id: "gift_tx_" + Date.now(),
                                   friendId: selectedFriend.id,
                                   friendName: selectedFriend.name,
@@ -7397,6 +7470,7 @@ export default function App() {
 
                                 // Fire audio if available
                                 playNotificationSound();
+                                setShowPurchaseConfetti(true);
 
                                 setIsGiftProcessing(false);
                                 setCustomGiftStoreItem(null);

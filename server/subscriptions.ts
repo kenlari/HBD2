@@ -22,8 +22,8 @@ const app = getApps().length === 0
   ? initializeApp({ projectId: appletConfig.projectId || process.env.FIREBASE_PROJECT_ID || "hbdd-498407" })
   : getApp();
 
-// Initialize using custom Firestore database ID to support multi-database setups
-const db = getFirestore(app, appletConfig.firestoreDatabaseId || undefined);
+// Initialize the default Firestore database
+const db = getFirestore(app);
 
 // Core Multiplier Conversion Anchors from Environment Variables
 const EXCHANGE_RATE_USD_TO_GHS = Number(process.env.EXCHANGE_RATE_USD_TO_GHS) || 14.5;

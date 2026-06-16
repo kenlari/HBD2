@@ -145,6 +145,10 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   // Checking uniqueness handles
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
   const [usernameError, setUsernameError] = useState("");
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [isCheckingPhone, setIsCheckingPhone] = useState(false);
+  const [phoneError, setPhoneError] = useState("");
 
   const [birthday, setBirthday] = useState("");
   const [password, setPassword] = useState("");
@@ -215,6 +219,71 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       // Fallback path to avoid blocking users
       setIsCheckingUsername(false);
       go(2);
+    }
+  };
+
+  const handleEmailNext = async () => {
+    const targetedEmail = email.trim().toLowerCase();
+    if (!validateEmail(targetedEmail)) {
+      setEmailError("Please enter a valid email address.");
+      triggerToast("Invalid Email ❌", "Please enter a valid email address.");
+      return;
+    }
+    
+    setIsCheckingEmail(true);
+    setEmailError("");
+    try {
+      const emailQuery = query(collection(db, "users"), where("email", "==", targetedEmail));
+      const querySnapshot = await getDocs(emailQuery);
+      
+      if (!querySnapshot.empty) {
+        setEmailError("This email address is already registered. Please go to Log In instead.");
+        triggerToast("Email Registered ❌", "This email address is already registered.");
+        setIsCheckingEmail(false);
+        return;
+      }
+      
+      setIsCheckingEmail(false);
+      go(3);
+    } catch (err: any) {
+      console.warn("Email verification database check bypass:", err);
+      setIsCheckingEmail(false);
+      go(3);
+    }
+  };
+
+  const handlePhoneNext = async () => {
+    const selectedCountry = COUNTRIES.find(c => c.code === selectedCountryCode) || COUNTRIES[0];
+    const cleanPhoneDigits = rawPhone.replace(/\D/g, '').replace(/^0+/, '');
+    const formattedPhone = `${selectedCountry.dialCode}${cleanPhoneDigits}`;
+
+    if (cleanPhoneDigits.length < 7) {
+      setPhoneError("Phone number must be at least 7 digits.");
+      triggerToast("Invalid Phone ❌", "Phone number must be at least 7 digits.");
+      return;
+    }
+
+    setIsCheckingPhone(true);
+    setPhoneError("");
+    try {
+      const phoneQuery1 = query(collection(db, "users"), where("phone", "==", formattedPhone));
+      const phoneQuery2 = query(collection(db, "users"), where("phoneNumber", "==", formattedPhone));
+      
+      const [snap1, snap2] = await Promise.all([getDocs(phoneQuery1), getDocs(phoneQuery2)]);
+      
+      if (!snap1.empty || !snap2.empty) {
+        setPhoneError("This phone number is already registered. Please use another number.");
+        triggerToast("Phone Registered ❌", "This phone number is already registered.");
+        setIsCheckingPhone(false);
+        return;
+      }
+
+      setIsCheckingPhone(false);
+      go(5);
+    } catch (err: any) {
+      console.warn("Phone uniqueness query recovery path active:", err);
+      setIsCheckingPhone(false);
+      go(5);
     }
   };
 
@@ -299,6 +368,11 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
           }
         }
       } catch (authErr: any) {
+        if (authErr.code === "auth/email-already-in-use" || authErr.message?.includes("already") || authErr.code === "auth/credential-already-in-use") {
+          setIsCompleting(false);
+          triggerToast("Account Already Exists ❌", "This email is already registered. Please go to Log In instead.");
+          return; // Strictly stop final register flow and prevent account creation
+        }
         console.warn("Firebase Auth bypassed or returned offline. Recovering with offline credentials:", authErr);
       }
 
@@ -445,25 +519,48 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       title: "What's your email?",
       subtitle: "This is crucial to secure your workspace account.",
       content: (
-        <div className="space-y-3">
-          <input
-            ref={inputRef}
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && validateEmail(email)) {
-                go(3);
-              }
-            }}
-            placeholder="name@example.com"
-            className="w-full bg-slate-900 border border-white/10 text-white text-lg font-semibold rounded-2xl px-5 py-4 outline-none focus:border-indigo-400 focus:bg-slate-800 transition-all placeholder:text-white/20 font-mono"
-          />
-          <p className="text-xs text-white/40 px-1 text-left">We will secure your account with standard email credentials.</p>
+        <div className="space-y-3 text-left">
+          <div className="relative">
+            <input
+              ref={inputRef}
+              type="email"
+              value={email}
+              onChange={e => {
+                setEmail(e.target.value);
+                setEmailError("");
+              }}
+              onKeyDown={async (e) => {
+                if (e.key === "Enter" && validateEmail(email) && !isCheckingEmail) {
+                  await handleEmailNext();
+                }
+              }}
+              placeholder="name@example.com"
+              className={`w-full bg-slate-900 border ${emailError ? "border-rose-500" : "border-white/10"} text-white text-lg font-semibold rounded-2xl pr-12 px-5 py-4 outline-none focus:border-indigo-400 focus:bg-slate-800 transition-all placeholder:text-white/20 font-mono`}
+            />
+            {validateEmail(email) && !isCheckingEmail && !emailError && (
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="absolute right-4 top-1/2 -translate-y-1/2 w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center"
+              >
+                <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
+              </motion.div>
+            )}
+            {isCheckingEmail && (
+              <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                <div className="w-5 h-5 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+              </div>
+            )}
+          </div>
+          {emailError ? (
+            <p className="text-xs text-rose-400 font-semibold px-1 leading-normal">{emailError}</p>
+          ) : (
+            <p className="text-xs text-white/40 px-1">We will secure your account with standard email credentials.</p>
+          )}
         </div>
       ),
-      canNext: validateEmail(email),
-      onNext: () => go(3),
+      canNext: validateEmail(email) && !isCheckingEmail,
+      onNext: handleEmailNext,
     },
 
     // STEP 3 — Birthday
@@ -564,7 +661,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
 
           <div className="space-y-2">
             <label className="block text-xs font-black uppercase tracking-wider text-white/40 px-1">Phone Number</label>
-            <div className="flex bg-slate-900 border border-white/10 rounded-2xl focus-within:border-indigo-400 focus-within:bg-slate-800 transition-all items-center overflow-hidden">
+            <div className={`flex bg-slate-900 border ${phoneError ? "border-rose-500" : "border-white/10"} rounded-2xl focus-within:border-indigo-400 focus-within:bg-slate-800 transition-all items-center overflow-hidden pr-4`}>
               <span className="pl-4 pr-1 text-indigo-400 font-extrabold text-lg select-none">
                 {(COUNTRIES.find(c => c.code === selectedCountryCode) || COUNTRIES[0]).dialCode}
               </span>
@@ -572,18 +669,43 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
                 ref={inputRef}
                 type="tel"
                 value={rawPhone}
-                onChange={e => handlePhoneInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && rawPhone.replace(/\D/g, "").length >= 7 && go(5)}
+                onChange={e => {
+                  handlePhoneInput(e.target.value);
+                  setPhoneError("");
+                }}
+                onKeyDown={async (e) => {
+                  if (e.key === "Enter" && rawPhone.replace(/\D/g, "").length >= 7 && !isCheckingPhone) {
+                    await handlePhoneNext();
+                  }
+                }}
                 placeholder="054 123 4567"
                 className="w-full bg-transparent text-white text-lg font-semibold px-2 py-4 outline-none placeholder:text-white/20 font-mono"
               />
+              {rawPhone.replace(/\D/g, "").length >= 7 && !isCheckingPhone && !phoneError && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center shrink-0"
+                >
+                  <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
+                </motion.div>
+              )}
+              {isCheckingPhone && (
+                <div className="shrink-0">
+                  <div className="w-5 h-5 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+                </div>
+              )}
             </div>
-            <p className="text-[10px] text-white/40 px-1 text-left">Digits only. Leading zeros are formatted out automatically.</p>
+            {phoneError ? (
+              <p className="text-xs text-rose-400 font-semibold px-1 leading-normal">{phoneError}</p>
+            ) : (
+              <p className="text-[10px] text-white/40 px-1">Digits only. Leading zeros are formatted out automatically.</p>
+            )}
           </div>
         </div>
       ),
-      canNext: rawPhone.replace(/\D/g, "").length >= 7,
-      onNext: () => go(5),
+      canNext: rawPhone.replace(/\D/g, "").length >= 7 && !isCheckingPhone,
+      onNext: handlePhoneNext,
     },
 
     // STEP 5 — Password

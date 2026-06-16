@@ -10,8 +10,7 @@ const firebaseConfig = {
   projectId: (import.meta as any).env?.VITE_FIREBASE_PROJECT_ID || appletConfig.projectId,
   storageBucket: (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket,
   messagingSenderId: (import.meta as any).env?.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId,
-  appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || appletConfig.appId,
-  firestoreDatabaseId: (import.meta as any).env?.VITE_FIREBASE_DATABASE_ID || appletConfig.firestoreDatabaseId || ""
+  appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || appletConfig.appId
 };
 
 console.log("Firebase config:", firebaseConfig); // temporary debug
