@@ -1,9 +1,12 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sparkles, X, Mail, Lock, Eye, EyeOff, Cake } from "lucide-react";
+import masterLogoUrl from "../assets/images/hbd_master_logo_1781644319362.jpg";
+import lightIconUrl from "../assets/images/hbd_light_icon_1781644333470.jpg";
+import darkIconUrl from "../assets/images/hbd_dark_icon_1781644346932.jpg";
 import { auth, db } from "../firebase";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, query, collection, where, getDocs } from "firebase/firestore";
 
 // ─────────────────────────────────────────────
 // LoginPage — drop this into your src/components/ folder
@@ -30,22 +33,60 @@ interface LoginPageProps {
 }
 
 export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProps) {
-  const [email, setEmail] = useState("");
+  const [emailOrUsername, setEmailOrUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !password.trim()) {
-      triggerToast("Missing Fields ⚠️", "Please enter your email and password.");
+    setLoginError(null);
+    const identifier = emailOrUsername.trim();
+    if (!identifier || !password.trim()) {
+      triggerToast("Missing Fields ⚠️", "Please enter your email/username and password.");
       return;
     }
     setIsLoading(true);
 
     try {
+      let resolvedEmail = identifier;
+      
+      // Detailed detection matching both normal addresses and custom handles
+      const isEmail = identifier.includes("@");
+      
+      if (!isEmail) {
+        const cleanUsername = identifier.toLowerCase().replace(/^@/, "").trim();
+        // 1. Initial lookup via usernames flat collection
+        const usernameDocRef = doc(db, "usernames", cleanUsername);
+        const usernameDocSnap = await getDoc(usernameDocRef);
+        
+        if (usernameDocSnap.exists()) {
+          const uDocData = usernameDocSnap.data();
+          if (uDocData && uDocData.email) {
+            resolvedEmail = uDocData.email;
+          } else {
+            throw { code: "auth/missing-email-username" };
+          }
+        } else {
+          // 2. Fallback to querying the users collection
+          const usernameQuery = query(collection(db, "users"), where("username", "==", cleanUsername));
+          const querySnapshot = await getDocs(usernameQuery);
+          
+          if (querySnapshot.empty) {
+            throw { code: "auth/user-not-found-username" };
+          }
+          
+          const userData = querySnapshot.docs[0].data();
+          if (!userData.email) {
+            throw { code: "auth/missing-email-username" };
+          }
+          resolvedEmail = userData.email;
+        }
+      }
+
       // 1. Sign in with Firebase Authentication
-      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password.trim());
+      const userCredential = await signInWithEmailAndPassword(auth, resolvedEmail, password.trim());
       const firebaseUser = userCredential.user;
 
       // 2. Fetch the corresponding profile schema document from Firestore with safety
@@ -82,9 +123,9 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
         // If Auth exists but document shape is missing or unreachable, formulate it dynamically from user session
         const fallbackProfile: LoginSession = {
           uid: firebaseUser.uid,
-          name: firebaseUser.displayName || email.split("@")[0],
-          username: email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "_"),
-          email: firebaseUser.email || email,
+          name: firebaseUser.displayName || resolvedEmail.split("@")[0],
+          username: resolvedEmail.split("@")[0].replace(/[^a-zA-Z0-9]/g, "_"),
+          email: firebaseUser.email || resolvedEmail,
           birthday: "1997-06-25",
           avatar: "bg-indigo-500",
           interests: ["Photography", "Specialty Coffee"]
@@ -96,12 +137,21 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
     } catch (error: any) {
       console.error("Firebase Login Error: ", error);
       let errorMsg = "Something went wrong. Please check your credentials.";
-      if (error.code === "auth/invalid-credential" || error.code === "auth/user-not-found" || error.code === "auth/wrong-password") {
-        errorMsg = "Incorrect email or password. Please try again.";
+      if (error.code === "auth/user-not-found-username") {
+        errorMsg = "Username not found. Please verify the handle typed, or sign up for a new account by clicking 'Create Account' below.";
+      } else if (
+        error.code === "auth/invalid-credential" || 
+        error.code === "auth/user-not-found" || 
+        error.code === "auth/wrong-password"
+      ) {
+        errorMsg = "Incorrect email/username or password. Please verify your details, or sign up for a new account by clicking 'Create Account' below.";
+      } else if (error.code === "auth/missing-email-username") {
+        errorMsg = "This username is registered but is missing a valid email reference.";
       } else if (error.code === "auth/invalid-email") {
         errorMsg = "The email address is invalid.";
       }
-      triggerToast("Sign In Failed ❌", errorMsg);
+      setLoginError(errorMsg);
+      triggerToast("Sign In Failed ❌", "Invalid Credentials.");
     } finally {
       setIsLoading(false);
     }
@@ -119,14 +169,22 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
         <motion.div
           initial={{ opacity: 0, y: -15 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center space-y-2"
+          className="text-center space-y-2 flex flex-col items-center"
         >
-          <span className="inline-flex w-14 h-14 bg-indigo-600 text-white rounded-2xl items-center justify-center text-2xl font-black">
-            B
-          </span>
-          <h1 className="text-2xl font-black text-white tracking-tight">
-            BloomBirth
-          </h1>
+          <div className="flex justify-center items-center">
+            <motion.div 
+              whileHover={{ scale: 1.06, rotate: 1.5 }}
+              transition={{ type: "spring", stiffness: 400, damping: 12 }}
+              className="relative group overflow-hidden rounded-3xl p-0.5 bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600 shadow-xl cursor-default"
+            >
+              <img
+                src={masterLogoUrl}
+                alt="HBD Reimagined Logo"
+                className="h-24 w-auto rounded-[22px] block object-contain"
+                referrerPolicy="no-referrer"
+              />
+            </motion.div>
+          </div>
           <p className="text-xs text-slate-400 leading-relaxed">
             Never miss a friend's birthday. Welcome back!
           </p>
@@ -142,24 +200,48 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           <div>
             <h3 className="font-extrabold text-sm text-slate-100">Sign In</h3>
             <p className="text-[11px] text-zinc-400 mt-0.5">
-              Log in to your BloomBirth account
+              Log in to your HBD account
             </p>
           </div>
 
+          {loginError && (
+            <motion.div 
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-3.5 space-y-2 border-dashed"
+            >
+              <div className="flex items-center gap-2 text-rose-400 font-extrabold text-xs">
+                <span>⚠️ Invalid Credentials</span>
+              </div>
+              <p className="text-[10px] text-slate-300 leading-relaxed">
+                {loginError}
+              </p>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={onGoToSignUp}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-[9.5px] font-black px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                >
+                  Create Account
+                </button>
+              </div>
+            </motion.div>
+          )}
+
           <form onSubmit={handleLogin} className="space-y-4">
-            {/* Email */}
+            {/* Email or Username */}
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                Email Address
+                Email or Username
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
-                  type="email"
+                  type="text"
                   required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. alex@example.com"
+                  value={emailOrUsername}
+                  onChange={(e) => setEmailOrUsername(e.target.value)}
+                  placeholder="e.g. alex@example.com or @alex"
                   className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-xs outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
@@ -205,6 +287,8 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                 "Sign In →"
               )}
             </button>
+
+
           </form>
 
           {/* Go to Sign Up */}

@@ -137,12 +137,14 @@ export function BirthdayDashboard({ friends, userName, onViewFriend, onOpenGiftA
 
 function Section({ label, dot, children }: { label: string; dot: string; children: React.ReactNode }) {
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-2 w-full">
       <div className="flex items-center gap-2 px-1">
         <div className={`w-1.5 h-1.5 rounded-full ${dot}`} />
         <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{label}</h3>
       </div>
-      <div className="space-y-2">{children}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 space-y-0">
+        {children}
+      </div>
     </motion.div>
   );
 }
@@ -170,7 +172,10 @@ function Card({ friend, days, index, onViewFriend, onOpenGiftAI, openWhatsApp }:
           <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 flex-wrap">
             <span>{formatDate(friend.birthday)}</span>
             <span>·</span>
-            <span>{friend.relationship}</span>
+            <span className="truncate max-w-[80px]">{friend.relationship}</span>
+            <span className={`sm:hidden text-[9px] font-bold px-1.5 py-0.5 rounded-md font-mono ${getUrgencyColor(days)}`}>
+              {getDaysLabel(days)}
+            </span>
             {friend.wishlist?.length > 0 && (
               <><span>·</span><span className="text-indigo-500 flex items-center gap-0.5"><Gift className="w-2.5 h-2.5" />{friend.wishlist.length}</span></>
             )}

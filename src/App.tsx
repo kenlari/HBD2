@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import masterLogoUrl from "./assets/images/hbd_master_logo_1781644319362.jpg";
 import { INITIAL_FRIENDS, ALL_ACHIEVEMENTS_LIST } from "./data";
 import { Friend, WishlistItem, Achievement, GiftSuggestion, InAppNotification, SentGift } from "./types";
 import { WidgetSimulator } from "./components/WidgetSimulator";
@@ -632,7 +633,7 @@ export default function App() {
   const [logs, setLogs] = useState<string[]>(() => {
     const saved = localStorage.getItem("birthday_activity_logs");
     return saved ? JSON.parse(saved) : [
-      "[10:42 AM] Connected to BloomBirth cloud system workspace.",
+      "[10:42 AM] Connected to HBD cloud system workspace.",
       "[11:15 AM] Jamie Chen's birthday wishlist updated with Matcha Bowl.",
       "[02:30 PM] Synchronized widget coordinates with iOS lock screen complication.",
       "[04:12 PM] Riley Cooper's birthday profile synchronized. Sourdough added."
@@ -1196,7 +1197,7 @@ export default function App() {
       {
         id: "sys-welcome",
         type: "system",
-        title: "BloomBirth Sync Status",
+        title: "HBD Sync Status",
         message: "Your address book and username listener is initialized and streaming in real-time.",
         timestamp: "Active",
         isRead: false
@@ -1290,91 +1291,123 @@ export default function App() {
 
   // System-wide registered discovery list listener (replacing LocalStorage arrays with cloud streams)
   useEffect(() => {
-    if (!userSession?.uid) {
+    if (authLoading) return;
+    if (!userSession?.uid || !auth.currentUser) {
       setRegistryUsers([]);
       return;
     }
 
-    const unsubscribe = onSnapshot(collection(db, "users"), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data.uid !== userSession.uid && data.username) {
-          list.push(data);
-        }
-      });
-      setRegistryUsers(list);
-    });
+    const unsubscribe = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        const list: any[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data.uid !== userSession.uid && data.username) {
+            list.push(data);
+          }
+        });
+        setRegistryUsers(list);
+      },
+      (error) => {
+        console.warn("[Registry Listener] Firestore snapshot reading denied or unauthenticated:", error.message || error);
+      }
+    );
 
     return () => unsubscribe();
-  }, [userSession?.uid]);
+  }, [userSession?.uid, authLoading]);
 
   // Firestore Real-Time Subcollection Subscriptions Flow
   useEffect(() => {
-    if (!userSession?.uid) {
+    if (authLoading) return;
+    if (!userSession?.uid || !auth.currentUser) {
       setFriends([]);
       return;
     }
 
-    const unsubFriends = onSnapshot(collection(db, "users", userSession.uid, "friends"), (snapshot) => {
-      isSyncingFromFirestoreRef.current = true;
-      const list: Friend[] = [];
-      snapshot.forEach((docSnap) => {
-        list.push(docSnap.data() as Friend);
-      });
-      setFriends(list);
-      prevFriendsRef.current = list;
-      setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
-    });
-
-    const unsubGifts = onSnapshot(collection(db, "users", userSession.uid, "sent_gifts"), (snapshot) => {
-      isSyncingFromFirestoreRef.current = true;
-      const list: SentGift[] = [];
-      snapshot.forEach((docSnap) => {
-        list.push(docSnap.data() as SentGift);
-      });
-      setSentGifts(list);
-      prevGiftsRef.current = list;
-      setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
-    });
-
-    const unsubNotifs = onSnapshot(collection(db, "users", userSession.uid, "notifications"), (snapshot) => {
-      isSyncingFromFirestoreRef.current = true;
-      const list: InAppNotification[] = [];
-      snapshot.forEach((docSnap) => {
-        list.push(docSnap.data() as InAppNotification);
-      });
-      setNotifications(list);
-      prevNotifsRef.current = list;
-      setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
-    });
-
-    const unsubUserDoc = onSnapshot(doc(db, "users", userSession.uid), (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.walletBalance !== undefined && data.walletBalance !== walletBalance) {
-          isSyncingFromFirestoreRef.current = true;
-          setWalletBalance(data.walletBalance);
-          setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
-        }
-        // Real-time plan status synchronization
-        if (data.plan === "pro" && data.planStatus === "active") {
-          setAccountType("Pro");
-        } else if (data.plan === "business" && data.planStatus === "active") {
-          setAccountType("Business");
-        } else if (data.accountType) {
-          setAccountType(data.accountType);
-        }
-        // Merge deep updates into the user session state
-        setUserSession(prev => {
-          if (!prev) return data as any;
-          if (JSON.stringify(prev) !== JSON.stringify(data)) {
-            return { ...prev, ...data };
-          }
-          return prev;
+    const unsubFriends = onSnapshot(
+      collection(db, "users", userSession.uid, "friends"),
+      (snapshot) => {
+        isSyncingFromFirestoreRef.current = true;
+        const list: Friend[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Friend);
         });
+        setFriends(list);
+        prevFriendsRef.current = list;
+        setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
+      },
+      (error) => {
+        console.warn("[Friends Listener] Firestore subscription denied or unauthenticated:", error.message || error);
       }
-    });
+    );
+
+    const unsubGifts = onSnapshot(
+      collection(db, "users", userSession.uid, "sent_gifts"),
+      (snapshot) => {
+        isSyncingFromFirestoreRef.current = true;
+        const list: SentGift[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as SentGift);
+        });
+        setSentGifts(list);
+        prevGiftsRef.current = list;
+        setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
+      },
+      (error) => {
+        console.warn("[Gifts Listener] Firestore subscription denied or unauthenticated:", error.message || error);
+      }
+    );
+
+    const unsubNotifs = onSnapshot(
+      collection(db, "users", userSession.uid, "notifications"),
+      (snapshot) => {
+        isSyncingFromFirestoreRef.current = true;
+        const list: InAppNotification[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as InAppNotification);
+        });
+        setNotifications(list);
+        prevNotifsRef.current = list;
+        setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
+      },
+      (error) => {
+        console.warn("[Notifications Listener] Firestore subscription denied or unauthenticated:", error.message || error);
+      }
+    );
+
+    const unsubUserDoc = onSnapshot(
+      doc(db, "users", userSession.uid),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data.walletBalance !== undefined && data.walletBalance !== walletBalance) {
+            isSyncingFromFirestoreRef.current = true;
+            setWalletBalance(data.walletBalance);
+            setTimeout(() => { isSyncingFromFirestoreRef.current = false; }, 80);
+          }
+          // Real-time plan status synchronization
+          if (data.plan === "pro" && data.planStatus === "active") {
+            setAccountType("Pro");
+          } else if (data.plan === "business" && data.planStatus === "active") {
+            setAccountType("Business");
+          } else if (data.accountType) {
+            setAccountType(data.accountType);
+          }
+          // Merge deep updates into the user session state
+          setUserSession(prev => {
+            if (!prev) return data as any;
+            if (JSON.stringify(prev) !== JSON.stringify(data)) {
+              return { ...prev, ...data };
+            }
+            return prev;
+          });
+        }
+      },
+      (error) => {
+        console.warn("[UserDoc Listener] Firestore subscription denied or unauthenticated:", error.message || error);
+      }
+    );
 
     return () => {
       unsubFriends();
@@ -1382,7 +1415,7 @@ export default function App() {
       unsubNotifs();
       unsubUserDoc();
     };
-  }, [userSession?.uid]);
+  }, [userSession?.uid, authLoading]);
 
   // State-to-Cloud Auto-Synchronizer Engine (Dirty State Interceptors)
   useEffect(() => {
@@ -2272,8 +2305,8 @@ export default function App() {
           <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-3xl">
             <Cake className="w-10 h-10 animate-spin text-indigo-400 opacity-80" style={{ animationDuration: "3s" }} />
           </div>
-          <h1 className="text-xl font-extrabold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent font-mono tracking-wider">
-            BLOOM BIRTH
+          <h1 className="text-xl font-extrabold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent font-mono tracking-wider text-center">
+            HBD — Happy Birthday, Reimagined.
           </h1>
           <p className="text-xs text-slate-500 font-semibold">Establishing encrypted cloud workspace...</p>
         </div>
@@ -2342,16 +2375,22 @@ export default function App() {
         <div>
           {/* Workspace Branding Header */}
           <div className="p-6 border-b border-slate-800" id="sidebar-title-cell">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-              <span className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-md cursor-pointer hover:bg-indigo-500 transition-colors shrink-0">
-                B
-              </span>
-              <div>
-                <h1 className="text-lg font-black text-white tracking-tight flex items-center gap-1.5">
-                  BloomBirth <span className="text-[10px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded font-mono uppercase">Pro</span>
-                </h1>
-                <p className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase">Birthday &amp; Wishlist Suite</p>
+            <div className="flex flex-col justify-center items-start">
+              <div className="w-full flex justify-start items-center">
+                <motion.div 
+                  whileHover={{ scale: 1.06, rotate: 1.5 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 12 }}
+                  className="relative group overflow-hidden rounded-2xl p-0.5 bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600 shadow-lg cursor-default"
+                >
+                  <img
+                    src={masterLogoUrl}
+                    alt="HBD Reimagined Logo"
+                    className="h-16 w-auto rounded-xl block object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                </motion.div>
               </div>
+              <p className="text-[9px] text-slate-400 font-bold tracking-wider uppercase mt-1 px-1">Birthday &amp; Wishlist Suite</p>
             </div>
 
             {/* Desktop clock widget showing mocked benchmark */}
@@ -2453,7 +2492,7 @@ export default function App() {
         </div>
 
         {/* Sidebar Footer Details */}
-        <div className="p-4 border-t border-slate-800 text-slate-500 text-[10.5px]" id="sidebar-footer">
+        <div className="pt-7 pb-4 px-4 border-t border-slate-800/60 text-slate-500 text-[10.5px]" id="sidebar-footer">
           <p className="font-semibold text-slate-400">Scheduled Landmark</p>
           <div className="flex justify-between items-center mt-1">
             <span className="truncate">{nextTarget.name}</span>
@@ -2463,7 +2502,7 @@ export default function App() {
       </aside>
 
       {/* MAIN CONTAINER WORKSPACE */}
-      <main className="flex-1 flex flex-col min-w-0 pb-28 lg:pb-0 lg:max-w-[1100px] lg:mx-auto" id="main-canvas-wrapper">
+      <main className="flex-1 flex flex-col min-w-0 pb-28 lg:pb-0 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8" id="main-canvas-wrapper">
         
         {/* TOP STATUS BAR ROW */}
         <header className={`bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-4 justify-between items-start lg:items-center gap-4 z-10 text-left relative ${activeSection === "dashboard" ? "flex flex-col lg:flex-row" : "hidden"}`} id="main-workspace-header">
@@ -2472,9 +2511,9 @@ export default function App() {
 
           <div className="flex w-full md:w-auto items-center justify-between md:justify-start gap-4">
             <div>
-              <span className="text-[9px] md:text-[10px] text-slate-400 uppercase tracking-widest font-black block">Your Space</span>
-              <h2 className="text-lg md:text-xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                {activeSection === "dashboard" && "Home"}
+              <span className="text-[9px] md:text-[10px] text-indigo-600 uppercase tracking-widest font-black block">Workspace</span>
+              <h2 className="text-xl md:text-2xl lg:text-3xl font-extrabold text-slate-805 tracking-tight flex items-center gap-2">
+                {activeSection === "dashboard" && "HBD — Happy Birthday, Reimagined."}
                 {activeSection === "registry" && "Buddies"}
                 {activeSection === "ai-lab" && "Gift Ideas"}
                 {activeSection === "my-wishlist" && "My Wishlist"}
@@ -5536,7 +5575,7 @@ export default function App() {
                     <p className="text-[10px] text-slate-400 mt-1">Configure criteria cards above and trigger the processor to list curated gifts.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6" id="ai-lab-suggestions-feed">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6" id="ai-lab-suggestions-feed">
                     {aiSuggestions.map((gift, idx) => (
                       <div 
                         key={idx}

@@ -73,7 +73,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
       {
         id: "msg-j-3",
         sender: "friend",
-        text: "Yes! Can't wait for my birthday. Did you check out my wishlist on BloomBirth yet? 🎂✨",
+        text: "Yes! Can't wait for my birthday. Did you check out my wishlist on HBD yet? 🎂✨",
         timestamp: nowStr,
         status: "delivered",
       }
@@ -672,7 +672,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          triggerToast("Media attachments disabled 📎", "BloomBirth restricts custom attachments to verified registry links.");
+                          triggerToast("Media attachments disabled 📎", "HBD restricts custom attachments to verified registry links.");
                         }}
                         className="p-1 text-slate-400 hover:text-indigo-400 transition-all cursor-pointer mr-1.5 shrink-0"
                         title="Upload media snap"

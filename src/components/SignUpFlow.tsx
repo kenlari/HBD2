@@ -309,6 +309,15 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
           walletBalance: 0,
           createdAt: new Date().toISOString()
         });
+
+        if (session.username) {
+          await setDoc(doc(db, "usernames", session.username.toLowerCase().trim()), {
+            uid: session.uid,
+            email: session.email.toLowerCase().trim(),
+            username: session.username.toLowerCase().trim(),
+            createdAt: new Date().toISOString()
+          }, { merge: true });
+        }
       } catch (dbErr: any) {
         console.warn("Firestore database save bypassed offline or permission issue:", dbErr);
       }

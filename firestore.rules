@@ -60,15 +60,16 @@ service cloud.firestore {
     
     // Users Profile Collection
     match /users/{userId} {
-      // Any signed-in user can read profiles to search/handshake, but writes are private to owner
-      allow read: if isSignedIn();
+      // Allow public read of user profiles for login username-by-email lookup, signup validation, and registry search
+      allow read: if true;
       allow create: if isOwner(userId);
       allow update: if isOwner(userId);
       allow delete: if isOwner(userId);
       
-      // Friends & buddies added by this user (Private to owner)
+      // Friends & buddies added by this user (Private to owner, or written by peer for handshake request)
       match /friends/{friendId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId) || (isSignedIn() && friendId == request.auth.uid);
       }
       
       // Historical sent gifts records (Private to owner)
@@ -76,10 +77,18 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
       
-      // In-app notifications & alerts (Private to owner)
+      // In-app notifications & alerts (Private to owner, peers can dispatch a notification doc)
       match /notifications/{notifId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create, update: if isSignedIn();
+        allow delete: if isOwner(userId);
       }
+    }
+
+    // Usernames collection mapping unique username strings to user profiles (and emails/uids)
+    match /usernames/{username} {
+      allow read: if true;
+      allow write: if isSignedIn();
     }
   }
 }
