@@ -288,7 +288,7 @@ export const QrScanner: React.FC<QrScannerProps> = ({ onScan, onClose }) => {
           </div>
           <div>
             <h4 className="text-sm font-black text-slate-100 flex items-center gap-1">
-              <span>HBD Live QR Scanner</span>
+              <span>HBD Loop Live QR Scanner</span>
             </h4>
             <p className="text-[10px] text-slate-400">Instantly populate buddies by scanning profile cards</p>
           </div>

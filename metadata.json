@@ -1,6 +1,6 @@
 {
-  "name": "HBD",
-  "description": "Never miss a birthday. Track, connect, and collaborate on wishlists.",
+  "name": "HBD Loop",
+  "description": "The Recurring Milestone & Gifting Network.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

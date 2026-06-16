@@ -169,24 +169,35 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
         <motion.div
           initial={{ opacity: 0, y: -15 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center space-y-2 flex flex-col items-center"
+          className="text-center space-y-4 flex flex-col items-center"
         >
           <div className="flex justify-center items-center">
             <motion.div 
-              whileHover={{ scale: 1.06, rotate: 1.5 }}
-              transition={{ type: "spring", stiffness: 400, damping: 12 }}
-              className="relative group overflow-hidden rounded-3xl p-0.5 bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600 shadow-xl cursor-default"
+              whileHover={{ scale: 1.04, rotate: 0.5 }}
+              transition={{ type: "spring", stiffness: 400, damping: 15 }}
+              className="cursor-default"
             >
-              <img
-                src={masterLogoUrl}
-                alt="HBD Reimagined Logo"
-                className="h-24 w-auto rounded-[22px] block object-contain"
-                referrerPolicy="no-referrer"
-              />
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "14px", backgroundColor: "transparent" }}>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" style={{ width: "44px", height: "44px", display: "block" }} fill="none">
+                  <rect x="12" y="15" width="14" height="70" rx="7" fill="url(#hbdLoopGrad)" />
+                  <rect x="74" y="15" width="14" height="70" rx="7" fill="url(#hbdLoopGrad)" />
+                  <path d="M 19,50 C 30,15 40,85 50,50 C 60,15 70,85 81,50 C 70,15 60,85 50,50 C 40,15 30,85 19,50 Z" fill="none" stroke="url(#hbdLoopGrad)" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" />
+                  <defs>
+                    <linearGradient id="hbdLoopGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#FF4D00" />
+                      <stop offset="100%" stopColor="#7C3AED" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+                <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1, textAlign: "left" }}>
+                  <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "28px", fontWeight: 900, letterSpacing: "3px", color: "#FAF8F4" }}>HBD<span style={{ color: "#FF4D00" }}>LOOP</span></span>
+                  <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "9px", fontWeight: 700, letterSpacing: "2px", color: "#6B7280", textTransform: "uppercase", marginTop: "2px" }}>Automated Gifting Engine</span>
+                </div>
+              </div>
             </motion.div>
           </div>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Never miss a friend's birthday. Welcome back!
+          <p className="text-xs font-bold text-indigo-400 leading-relaxed uppercase tracking-wider">
+            The Recurring Milestone &amp; Gifting Network.
           </p>
         </motion.div>
 
@@ -200,7 +211,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           <div>
             <h3 className="font-extrabold text-sm text-slate-100">Sign In</h3>
             <p className="text-[11px] text-zinc-400 mt-0.5">
-              Log in to your HBD account
+              Log in to your HBD Loop account
             </p>
           </div>
 

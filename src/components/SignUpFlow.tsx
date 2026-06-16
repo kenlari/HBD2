@@ -403,7 +403,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       // 4. Force onComplete to trigger state changes instantly
       setIsCompleting(false);
       onComplete(session);
-      triggerToast("Welcome to HBD! 🥳", "Your secure cloud profile is synchronized and active.");
+      triggerToast("Welcome to HBD Loop! 🥳", "Your secure cloud profile is synchronized and active.");
     } catch (err: any) {
       console.error("Resilient completion fallback triggered:", err);
       // Guarantee transition is absolute, never blocks the screen
@@ -411,7 +411,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       localStorage.setItem("birthday_authenticated_user", JSON.stringify(session));
       setIsCompleting(false);
       onComplete(session);
-      triggerToast("Welcome to HBD! 🥳", "Proceeding into workspace dashboard.");
+      triggerToast("Welcome to HBD Loop! 🥳", "Proceeding into workspace dashboard.");
     }
   };
 

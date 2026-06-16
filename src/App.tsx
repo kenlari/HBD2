@@ -2322,7 +2322,7 @@ export default function App() {
             <Cake className="w-10 h-10 animate-spin text-indigo-400 opacity-80" style={{ animationDuration: "3s" }} />
           </div>
           <h1 className="text-xl font-extrabold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent font-mono tracking-wider text-center">
-            HBD — Happy Birthday, Reimagined.
+            HBD Loop — The Recurring Milestone &amp; Gifting Network.
           </h1>
           <p className="text-xs text-slate-500 font-semibold">Establishing encrypted cloud workspace...</p>
         </div>
@@ -2393,20 +2393,25 @@ export default function App() {
           <div className="p-6 border-b border-slate-800" id="sidebar-title-cell">
             <div className="flex flex-col justify-center items-start">
               <div className="w-full flex justify-start items-center">
-                <motion.div 
-                  whileHover={{ scale: 1.06, rotate: 1.5 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 12 }}
-                  className="relative group overflow-hidden rounded-2xl p-0.5 bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600 shadow-lg cursor-default"
-                >
-                  <img
-                    src={masterLogoUrl}
-                    alt="HBD Reimagined Logo"
-                    className="h-16 w-auto rounded-xl block object-contain"
-                    referrerPolicy="no-referrer"
-                  />
-                </motion.div>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "10px", backgroundColor: "transparent" }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" style={{ width: "36px", height: "36px", display: "block" }} fill="none">
+                    <rect x="12" y="15" width="14" height="70" rx="7" fill="url(#hbdLoopGradSide)" />
+                    <rect x="74" y="15" width="14" height="70" rx="7" fill="url(#hbdLoopGradSide)" />
+                    <path d="M 19,50 C 30,15 40,85 50,50 C 60,15 70,85 81,50 C 70,15 60,85 50,50 C 40,15 30,85 19,50 Z" fill="none" stroke="url(#hbdLoopGradSide)" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" />
+                    <defs>
+                      <linearGradient id="hbdLoopGradSide" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#FF4D00" />
+                        <stop offset="100%" stopColor="#7C3AED" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1, textAlign: "left" }}>
+                    <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "22px", fontWeight: 900, letterSpacing: "2px", color: "#FAF8F4" }}>HBD<span style={{ color: "#FF4D00" }}>LOOP</span></span>
+                    <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "8px", fontWeight: 700, letterSpacing: "1px", color: "#6B7280", textTransform: "uppercase", marginTop: "1px" }}>Automated Gifting Engine</span>
+                  </div>
+                </div>
               </div>
-              <p className="text-[9px] text-slate-400 font-bold tracking-wider uppercase mt-1 px-1">Birthday &amp; Wishlist Suite</p>
+              <p className="text-[10px] text-slate-400 font-bold tracking-normal mt-3 px-1 text-left leading-snug">The Recurring Milestone &amp; Gifting Network.</p>
             </div>
 
             {/* Desktop clock widget showing mocked benchmark */}
@@ -6392,7 +6397,7 @@ export default function App() {
                               interests: userSession ? userSession.interests.join(", ") : "Cyberpunk, Mechanic Keyboards",
                               connectedBack: true
                             }))}`}
-                            alt="Your HBD Profile QR Code Pass"
+                            alt="Your HBD Loop Profile QR Code Pass"
                             className="w-[100px] h-[100px] block"
                             referrerPolicy="no-referrer"
                           />
@@ -6408,7 +6413,7 @@ export default function App() {
                             <span className="text-[11px] font-mono text-emerald-400 font-bold block">@{userSession ? userSession.username : "alex_patel"}</span>
                           </div>
                           <p className="text-[10px] text-slate-350 leading-relaxed max-w-sm">
-                            Show this private token to other HBD dashboard workspace users. Once scanned, your coordinates will populate instantly with mutual 🤝 connections enabled!
+                            Show this private token to other HBD Loop dashboard workspace users. Once scanned, your coordinates will populate instantly with mutual 🤝 connections enabled!
                           </p>
                         </div>
                       </div>
@@ -8243,7 +8248,7 @@ export default function App() {
                       interests: userSession ? userSession.interests.join(", ") : "Cyberpunk, Mechanic Keyboards",
                       connectedBack: true
                     }))}`}
-                    alt="Scan HBD QR Handshake"
+                    alt="Scan HBD Loop QR Handshake"
                     className="w-[160px] h-[160px] block"
                     referrerPolicy="no-referrer"
                   />
@@ -8254,7 +8259,7 @@ export default function App() {
                   <p className="text-xs text-indigo-300 font-medium">@{userSession ? userSession.username : "alex_patel"}</p>
                 </div>
                 <p className="text-[10px] text-slate-300 leading-relaxed font-normal max-w-[280px]">
-                  Point a camera or standard QR scanner here to sync profiles with 🤝 HBD mutual connect parameters instantly!
+                  Point a camera or standard QR scanner here to sync profiles with 🤝 HBD Loop mutual connect parameters instantly!
                 </p>
               </div>
 
