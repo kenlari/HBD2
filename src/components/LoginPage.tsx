@@ -684,7 +684,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           </motion.div>
 
           <div className="space-y-1">
-            <h1 className="text-3xl font-black text-slate-805 tracking-tight font-sans">
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight font-sans">
               HBD<span className="text-[#FF4D00]">LOOP</span>
             </h1>
             {/* Dynamic Typing animated effect */}
@@ -991,7 +991,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           <span className="font-bold">Continue with Google</span>
         </button>
 
-        <p className="text-[10px] text-slate-450 font-bold tracking-widest uppercase">
+        <p className="text-[10px] text-slate-600 font-bold tracking-widest uppercase">
           Track Birthdays · AI Gift Ideas · Secure Wishlists
         </p>
       </div>
