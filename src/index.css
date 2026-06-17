@@ -21,7 +21,7 @@ html.dark {
 }
 
 /* Root app container viewport background color */
-.dark #bloom-app-root {
+.dark #hbd-app-root {
   background-color: #0b0f19 !important;
   color: #dfe4ec !important;
 }

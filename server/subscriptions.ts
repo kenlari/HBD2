@@ -214,14 +214,17 @@ router.post("/webhook", async (req, res) => {
         // Perform privileged update on User document using Admin SDK with fail-safe logging
         const userRef = db.collection("users").doc(userId);
         try {
+          const accType = billingCycle === "yearly" ? "Business" : "Pro";
           await userRef.set({
-            plan: "pro",
+            plan: billingCycle === "yearly" ? "business" : "pro",
             planStatus: "active",
+            isPremium: true,
+            accountType: accType,
             billingCycle: billingCycle,
             planExpiresAt: expiresAt.toISOString(),
             updatedAt: new Date().toISOString()
           }, { merge: true });
-          console.log(`[Paystack Webhook] User ${userId} upgraded to premium pro tier (${billingCycle}) successfully.`);
+          console.log(`[Paystack Webhook] User ${userId} upgraded to premium ${accType} tier (${billingCycle}) successfully.`);
         } catch (err) {
           console.error(`[Fail-safe warning] Admin SDK failed to set/update subscription plan for users/${userId} in Firestore:`, err);
         }

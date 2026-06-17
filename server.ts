@@ -15,6 +15,12 @@ app.use(express.json());
 // Subscription payment integration endpoints
 app.use("/api/subscriptions", subscriptionRouter);
 
+// Support direct webhook route from Railway active domain for Paystack
+app.use("/webhook/paystack", (req, res, next) => {
+  req.url = "/webhook";
+  next();
+}, subscriptionRouter);
+
 // Lazy-loaded Gemini AI client helper
 let aiClient: GoogleGenAI | null = null;
 

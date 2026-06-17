@@ -43,7 +43,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   const [activeCall, setActiveCall] = useState<{ type: "audio" | "video"; name: string } | null>(null);
   
   // Custom theme wallpaper preferences for the Snapchat/WhatsApp hybrid
-  const [chatTheme, setChatTheme] = useState<"whatsapp-dark" | "snapchat-neon" | "bloom-purple">("whatsapp-dark");
+  const [chatTheme, setChatTheme] = useState<"whatsapp-dark" | "snapchat-neon" | "loop-purple">("whatsapp-dark");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // Chat Histories store
@@ -188,7 +188,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     if (text.includes("wishlist") || text.includes("wishes") || text.includes("wish") || text.includes("want") || text.includes("gift")) {
       if (friend.wishlist.length > 0) {
         const itemNames = friend.wishlist.map(w => `"${w.title}"`).join(", ");
-        return `Ooh! Yes! My wishlist is saved right here on my Bloom profile 💝. I've been eyeing ${itemNames}. Hop on over to the 'Wishes' tab above checking them out!`;
+        return `Ooh! Yes! My wishlist is saved right here on my HBD Loop profile 💝. I've been eyeing ${itemNames}. Hop on over to the 'Wishes' tab above checking them out!`;
       } else {
         return `Ah, I haven't added specific items to my wishlist yet. I love anything related to ${friend.interests.slice(0, 3).join(", ")} though! Any creative surprise fits my style perfectly! 😊`;
       }
@@ -267,7 +267,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
               <h2 className="text-xl font-black tracking-tight">{activeCall.name}</h2>
               <div className="flex items-center justify-center gap-1.5 text-emerald-400 font-mono text-xs font-bold animate-pulse">
                 <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>Ringing dynamically via BloomNet...</span>
+                <span>Ringing dynamically via HBD Loop workspace...</span>
               </div>
             </div>
 
@@ -317,10 +317,10 @@ export const ChatPage: React.FC<ChatPageProps> = ({
             {/* Theme picker trigger */}
             <button
               onClick={() => {
-                const next: Record<string, "whatsapp-dark" | "snapchat-neon" | "bloom-purple"> = {
+                const next: Record<string, "whatsapp-dark" | "snapchat-neon" | "loop-purple"> = {
                   "whatsapp-dark": "snapchat-neon",
-                  "snapchat-neon": "bloom-purple",
-                  "bloom-purple": "whatsapp-dark"
+                  "snapchat-neon": "loop-purple",
+                  "loop-purple": "whatsapp-dark"
                 };
                 setChatTheme(next[chatTheme]);
                 triggerToast("Wallpaper Switched", `Now styling chats using ${next[chatTheme]} aesthetic.`);
@@ -703,7 +703,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          triggerToast("Voice recording locked 🎙️", "Bloom voice note sync requires the premium companion package.");
+                          triggerToast("Voice recording locked 🎙️", "HBD voice note sync requires the premium companion package.");
                         }}
                         className="w-11 h-11 rounded-full bg-[#2a3942] text-slate-300 flex items-center justify-center hover:bg-[#202c33] transition-all active:scale-95 shrink-0 cursor-pointer"
                         title="Record Snapchat style audio log"

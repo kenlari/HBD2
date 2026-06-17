@@ -72,4 +72,17 @@ export interface SentGift {
   isOpened?: boolean;
 }
 
+export interface ReceivedGift {
+  id: string;
+  senderId: string;
+  senderName: string;
+  giftType: string;
+  giftName: string;
+  price: string;
+  status: string;
+  message: string;
+  dateReceived: string;
+  isOpened?: boolean;
+}
+
 
