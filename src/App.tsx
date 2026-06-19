@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import masterLogoUrl from "./assets/images/hbd_master_logo_1781644319362.jpg";
 import { INITIAL_FRIENDS, ALL_ACHIEVEMENTS_LIST } from "./data";
 import { Friend, WishlistItem, Achievement, GiftSuggestion, InAppNotification, SentGift, ReceivedGift } from "./types";
@@ -6,8 +6,8 @@ import { WidgetSimulator } from "./components/WidgetSimulator";
 import { MOCK_EXTERNAL_PROFILES, MockProfile } from "./mockProfiles";
 import { QrScanner } from "./components/QrScanner";
 import { auth, db } from "./firebase";
-import { onAuthStateChanged, signOut, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
-import { collection, doc, setDoc, deleteDoc, getDoc, onSnapshot } from "firebase/firestore";
+import { onAuthStateChanged, signOut, sendPasswordResetEmail } from "firebase/auth";
+import { collection, doc, setDoc, deleteDoc, getDoc, onSnapshot, query, limit as firestoreLimit } from "firebase/firestore";
 import { 
   Gift, 
   Calendar, 
@@ -229,7 +229,7 @@ export default function App() {
     }
     return "+233241234567";
   });
-  const [signInBirthday, setSignInBirthday] = useState<string>("1997-06-25");
+  const [signInBirthday, setSignInBirthday] = useState<string>("");
   const [signInAvatar, setSignInAvatar] = useState<string>("bg-indigo-600");
   const [signInInterests, setSignInInterests] = useState<string[]>(["Photography", "Specialty Coffee"]);
 
@@ -397,7 +397,13 @@ export default function App() {
   const [ledgerSubTab, setLedgerSubTab] = useState<"sent" | "received">("sent");
 
   // --- IN-APP GIFT STORE MANAGEMENT STATES ---
-  const [giftStoreTab, setGiftStoreTab] = useState<"gallery" | "ledger">("gallery");
+  const [giftStoreTab, setGiftStoreTab] = useState<"gallery" | "pools" | "ledger">("gallery");
+  const [giftCarouselIndex, setGiftCarouselIndex] = useState<number>(0);
+  const [giftSwipeStartX, setGiftSwipeStartX] = useState<number | null>(null);
+  const [giftContributionAmount, setGiftContributionAmount] = useState<string>("50");
+  const giftAmountMin = 5;
+  const giftAmountMax = 500;
+  const selectedStoreGift = GIFT_INVENTORY[giftCarouselIndex] || GIFT_INVENTORY[0];
   const [customGiftStoreItem, setCustomGiftStoreItem] = useState<{ id: string; name: string; type: string; usdPrice: number } | null>(null);
   const [giftRecipientId, setGiftRecipientId] = useState<string>("");
   const [giftRevealDate, setGiftRevealDate] = useState<string>("");
@@ -639,9 +645,34 @@ export default function App() {
     try {
       const uId = userSession.uid || (userSession as any).userId || "";
       const email = userSession.email || "";
-      const apiBase = (import.meta as any).env.VITE_API_URL || "";
+      const rawApiBase = ((import.meta as any).env.VITE_API_URL || "").trim();
+      const apiBase = rawApiBase.replace(/\/+$/, "");
+      let subscriptionEndpoint = "/api/subscriptions/initialize";
+
+      if (apiBase) {
+        const isAbsolute = /^https?:\/\//i.test(apiBase);
+        const url = isAbsolute ? new URL(apiBase) : null;
+        const segments = url ? url.pathname.split("/").filter(Boolean) : apiBase.split("/").filter(Boolean);
+        const lastSegment = segments[segments.length - 1];
+        const hasApiSegment = segments.includes("api");
+        const hasSubscriptionsSegment = segments.includes("subscriptions");
+
+        if (lastSegment === "initialize" && hasApiSegment && hasSubscriptionsSegment) {
+          subscriptionEndpoint = apiBase;
+        } else if (lastSegment === "subscriptions" && hasApiSegment) {
+          subscriptionEndpoint = `${apiBase}/initialize`;
+        } else if (lastSegment === "api") {
+          subscriptionEndpoint = `${apiBase}/subscriptions/initialize`;
+        } else if (hasApiSegment && hasSubscriptionsSegment) {
+          subscriptionEndpoint = `${apiBase}/initialize`;
+        } else if (hasApiSegment) {
+          subscriptionEndpoint = `${apiBase}/subscriptions/initialize`;
+        } else {
+          subscriptionEndpoint = `${apiBase}/api/subscriptions/initialize`;
+        }
+      }
       
-      const response = await fetch(`${apiBase}/api/subscriptions/initialize`, {
+      const response = await fetch(subscriptionEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -655,10 +686,16 @@ export default function App() {
         }),
       });
       
-      const resData = await response.json();
+      const contentType = response.headers.get("content-type") || "";
+      let resData: any;
+      try {
+        resData = await response.json();
+      } catch (jsonError) {
+        throw new Error(`Payment endpoint returned non-JSON response (${response.status}). Check that ${subscriptionEndpoint} is a real API route.`);
+      }
       
       if (!response.ok || !resData.authorization_url) {
-        throw new Error(resData.error || "Failed to initialize premium invoice with Paystack gateway.");
+        throw new Error(resData.error || `Payment endpoint returned HTTP ${response.status}.`);
       }
       
       triggerToast("Redirecting to Paystack... 💳", "Preparing secure checkout window.");
@@ -895,51 +932,29 @@ export default function App() {
   // --- CONNECT & IMPORT WORKSPACE STATES ---
   const [profileSubTab, setProfileSubTab] = useState<"settings" | "profile" | "wishlist" | "widgets" | "trophies">("settings");
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = useState<boolean>(false);
-  const [currentPasswordState, setCurrentPasswordState] = useState<string>("");
-  const [newPasswordState, setNewPasswordState] = useState<string>("");
-  const [isUpdatingPassword, setIsUpdatingPassword] = useState<boolean>(false);
+  const [isPasswordResetLoading, setIsPasswordResetLoading] = useState<boolean>(false);
 
-  const handleUpdatePassword = async () => {
+  const handlePasswordReset = async () => {
     if (!auth.currentUser) {
       triggerToast("Not Authenticated ⚠️", "Please verify your sign in session first.");
       return;
     }
-    if (!currentPasswordState.trim() || !newPasswordState.trim()) {
-      triggerToast("Missing Fields 🔑", "Please input both your current password and your new password.");
-      return;
-    }
-    if (newPasswordState.trim().length < 6) {
-      triggerToast("Too Weak ❌", "Your new password must be at least 6 characters.");
+
+    const userEmail = auth.currentUser.email;
+    if (!userEmail) {
+      triggerToast("Email Missing ⚠️", "This account does not have an email address for password recovery.");
       return;
     }
 
-    setIsUpdatingPassword(true);
+    setIsPasswordResetLoading(true);
     try {
-      if (auth.currentUser.providerData.some((p) => p.providerId === "google.com")) {
-        throw new Error("You are signed in via Google Account (SSO). Security is managed by Google. Standard credentials updates are not available.");
-      }
-
-      const userEmail = auth.currentUser.email;
-      if (!userEmail) {
-        throw new Error("Unable to identify registered email address on current account.");
-      }
-
-      const credential = EmailAuthProvider.credential(userEmail, currentPasswordState.trim());
-      await reauthenticateWithCredential(auth.currentUser, credential);
-      await updatePassword(auth.currentUser, newPasswordState.trim());
-      
-      triggerToast("Password Updated! 🔒", "Your new login credentials are active and synchronized.");
-      setCurrentPasswordState("");
-      setNewPasswordState("");
+      await sendPasswordResetEmail(auth, userEmail);
+      triggerToast("Check your email", `We sent a password reset link to ${userEmail}.`);
     } catch (error: any) {
-      console.error("Credentials setting update error:", error);
-      let errMsg = error.message || "Failed to update security credentials.";
-      if (error.code === "auth/wrong-password" || error.code === "auth/invalid-credential" || error.message?.includes("auth/invalid-credential")) {
-        errMsg = "The current password you provided is incorrect.";
-      }
-      triggerToast("Update Failed ❌", errMsg);
+      console.error("Password reset error:", error);
+      triggerToast("Reset Failed ❌", error.message || "We could not send the password reset email.");
     } finally {
-      setIsUpdatingPassword(false);
+      setIsPasswordResetLoading(false);
     }
   };
   const [registrySubTab, setRegistrySubTab] = useState<"list" | "wishlist" | "widgets" | "trophies" | "connect" | "requests">("list");
@@ -1081,7 +1096,7 @@ export default function App() {
         }
       }
 
-      const avatar = bgColors[Math.floor(Math.random() * bgColors.length)];
+      const avatar = "bg-indigo-500";
       contacts.push({ name, phone, email, birthday, avatar });
     }
     return contacts;
@@ -1108,7 +1123,7 @@ export default function App() {
             name: nc.name,
             phone: nc.phone || "",
             email: nc.email || "",
-            birthday: nc.birthday || "1997-11-21",
+            birthday: nc.birthday || "",
             avatar: nc.avatar || "bg-indigo-500",
             source: nc.source || "File Backup"
           });
@@ -1154,32 +1169,28 @@ export default function App() {
 
     try {
       setIsSyncing(true);
-      const props = ["name", "tel", "email"];
+      const props = ["name", "tel", "email", "birthday"];
       const opts = { multiple: true };
       const selectedContacts = await (navigator as any).contacts.select(props, opts);
       
-      const mapped = selectedContacts.map((c: any) => {
-        const name = c.name && c.name[0] ? c.name[0] : "Unnamed Contact";
-        const phone = c.tel && c.tel[0] ? c.tel[0] : "";
-        const email = c.email && c.email[0] ? c.email[0] : "";
-        
-        const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-        const day = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
-        const month = months[Math.floor(Math.random() * months.length)];
-        const bday = `1997-${month}-${day}`;
+        const mapped = selectedContacts.map((c: any) => {
+          const name = c.name && c.name[0] ? c.name[0] : "Unnamed Contact";
+          const phone = c.tel && c.tel[0] ? c.tel[0] : "";
+          const email = c.email && c.email[0] ? c.email[0] : "";
+          const birthdayValue = c.birthday;
+          const birthday = birthdayValue
+            ? (birthdayValue instanceof Date ? birthdayValue.toISOString().split("T")[0] : String(birthdayValue).split("T")[0])
+            : "";
 
-        const bgColors = ["bg-teal-500", "bg-emerald-500", "bg-indigo-500", "bg-purple-500", "bg-amber-500", "bg-rose-500"];
-        const randomBg = bgColors[Math.floor(Math.random() * bgColors.length)];
-
-        return {
-          name,
-          phone,
-          email,
-          birthday: bday,
-          avatar: randomBg,
-          source: "Device Address Book"
-        };
-      });
+          return {
+            name,
+            phone,
+            email,
+            birthday,
+            avatar: "bg-indigo-500",
+            source: "Device Address Book"
+          };
+        });
 
       handleImportedContacts(mapped);
     } catch (err: any) {
@@ -1196,7 +1207,6 @@ export default function App() {
   };
 
   const handleImportLocalContact = (sc: SyncedContact) => {
-    const bday = sc.birthday || "1997-11-21";
     const nextId = sc.id;
     
     // Check Freemium tier constraints
@@ -1210,21 +1220,25 @@ export default function App() {
     const newFriend: Friend = {
       id: nextId,
       name: sc.name,
-      birthday: bday,
-      relationship: "Contact Tracker",
-      age: "25",
-      interests: ["Baking", "Plants", "Photography"],
+      birthday: sc.birthday || "",
+      relationship: "Local Celebrant",
+      age: "",
+      interests: [],
       avatar: sc.avatar || "bg-indigo-500",
       wishlist: [],
       achievements: [],
-      phone: sc.phone || "+233241234567",
-      email: sc.email || "friend@example.com",
-      connectedBack: true
+      phone: sc.phone || "",
+      email: sc.email || "",
+      whatsapp: sc.phone || "",
+      connectedBack: false,
+      incomingRequest: false,
+      requestType: "local_celebrant",
+      notOnHbd: true
     };
 
     setFriends(prev => [...prev, newFriend]);
-    appendLog(`🎂 Imported Address Book Tracker: Scanned and integrated ${sc.name} as offline celebration companion.`);
-    triggerToast("Tracker Imported! 🎂", `${sc.name} added to your celebration dashboard circles.`);
+    appendLog(`🎂 Imported Local Celebrant: ${sc.name} is tracked privately and is not on HBD yet.`);
+    triggerToast("Local Tracker Added! 🎂", `${sc.name} was added as a private local celebrant. They are not on HBD yet.`);
   };
 
   // Automatically populate edit profile input fields when user session gets loaded/edited
@@ -1235,14 +1249,15 @@ export default function App() {
       setSignInEmail(userSession.email || "");
       setSignInPhone((userSession as any).phone || "+233241234567");
       setSignInWhatsApp((userSession as any).whatsapp || "+233241234567");
-      setSignInBirthday(userSession.birthday || "1997-06-25");
+      setSignInBirthday(userSession.birthday || "");
       setSignInAvatar(userSession.avatar || "bg-indigo-500");
       setSignInInterests(userSession.interests || []);
     }
   }, [userSession]);
 
   // Helper to retrieve all searchable accounts (Preset mocks + dynamic registered users)
-  const getSearchableProfiles = () => {
+  const getSearchableProfiles = useMemo(() => {
+    const buildSearchableProfiles = () => {
     const saved = localStorage.getItem("hbd_all_accounts");
     let registeredList: any[] = [];
     if (saved) {
@@ -1295,6 +1310,24 @@ export default function App() {
     });
 
     return merged;
+    };
+
+    return buildSearchableProfiles;
+  }, [userSession?.username, friends.length, syncedContacts.length]);
+
+  const profileQrPayload = useMemo(() => {
+    if (!userSession) return null;
+    return JSON.stringify({
+      hbd: true,
+      uid: userSession.uid,
+      username: userSession.username,
+      name: userSession.name
+    });
+  }, [userSession?.uid, userSession?.username, userSession?.name]);
+
+  const getProfileQrUrl = (size = 200) => {
+    if (!profileQrPayload) return "";
+    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(profileQrPayload)}`;
   };
 
   // Posted status map
@@ -1369,17 +1402,9 @@ export default function App() {
               return;
             }
 
-            // Document missing fallback initialization (prevents desync on cold-boots)
-            const fallback = {
-              uid: firebaseUser.uid,
-              name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
-              username: firebaseUser.email?.split("@")[0].replace(/[^a-zA-Z0-9]/g, "_") || "user",
-              email: firebaseUser.email || "",
-              birthday: "1997-06-25",
-              avatar: "bg-indigo-500",
-              interests: []
-            };
-            setUserSession(fallback);
+            localStorage.removeItem("birthday_authenticated_user");
+            setAuthLoading(false);
+            return;
           }
         } catch (error: any) {
           console.log("Firebase auth profile loader (handled gracefully offline):", error?.message || error);
@@ -1395,16 +1420,7 @@ export default function App() {
               }
             } catch (jsonErr) {}
           }
-          // Default transient session shape
-          setUserSession({
-            uid: firebaseUser.uid,
-            name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Offline User",
-            username: firebaseUser.email?.split("@")[0].replace(/[^a-zA-Z0-9]/g, "_") || "offline_user",
-            email: firebaseUser.email || "",
-            birthday: "1997-06-25",
-            avatar: "bg-indigo-500",
-            interests: []
-          });
+          setUserSession(null);
         }
       } else {
         setUserSession(null);
@@ -1424,7 +1440,7 @@ export default function App() {
     }
 
     const unsubscribe = onSnapshot(
-      collection(db, "users"),
+      query(collection(db, "users"), firestoreLimit(100)),
       (snapshot) => {
         const list: any[] = [];
         snapshot.forEach((docSnap) => {
@@ -1593,7 +1609,7 @@ export default function App() {
     };
 
     syncWork();
-  }, [friends, userSession?.uid, registryUsers]);
+  }, [friends, userSession?.uid]);
 
   // Sync Sent Gift Logs to Cloud
   useEffect(() => {
@@ -2035,9 +2051,19 @@ export default function App() {
   };
 
   // --- CONNECT INTERACTIVE SYSTEM HANDLERS ---
+  const hasFriendIdentity = (profile: any) => {
+    const profileId = profile.id || profile.uid || profile.username;
+    return friends.some((f) =>
+      f.id === profileId ||
+      f.id === profile.uid ||
+      f.snapchat === profile.username ||
+      f.name.toLowerCase() === profile.name.toLowerCase()
+    );
+  };
+
   const handleImportInitiate = (profile: MockProfile) => {
     // Check if duplicate Name exists to guard roster integrity
-    if (friends.some((f) => f.id === profile.id || f.name.toLowerCase() === profile.name.toLowerCase())) {
+    if (hasFriendIdentity(profile)) {
       triggerToast("Already Synchronized 🤝", `${profile.name} has already been registered to your Circle roster.`);
       return;
     }
@@ -2097,6 +2123,22 @@ export default function App() {
     if (!pendingConnectProfile) return;
     const profile = pendingConnectProfile;
 
+    if ((profile as any).localOnly || (profile as any).notOnHbd) {
+      const localContact: SyncedContact = {
+        id: `local-${(profile as any).username || Date.now().toString()}`,
+        name: profile.name || "Demo Buddy",
+        phone: (profile as any).phone || "",
+        email: (profile as any).email || "",
+        birthday: (profile as any).birthday || "",
+        avatar: (profile as any).avatar || "bg-indigo-500",
+        source: "QR Simulator"
+      };
+      handleImportLocalContact(localContact);
+      setShowRelationModal(false);
+      setPendingConnectProfile(null);
+      return;
+    }
+
     // Free account friend limit check
     const companionCount = friends.filter(f => f.id !== "alex").length;
     if (accountType === "Free" && companionCount >= 5) {
@@ -2108,8 +2150,12 @@ export default function App() {
     }
 
     const nextId = profile.id;
-
-    // Add to friends as pending (connectedBack: false, incomingRequest: false)
+    if (hasFriendIdentity(profile)) {
+      triggerToast("Request Already Sent", `${profile.name} is already connected or waiting for acceptance.`);
+      setShowRelationModal(false);
+      setPendingConnectProfile(null);
+      return;
+    }
     const newFriend: Friend = {
       id: nextId,
       name: profile.name,
@@ -2120,10 +2166,11 @@ export default function App() {
       avatar: profile.avatar,
       wishlist: [], // EMPTY initially!
       achievements: [],
-      phone: profile.phone || "+233241234567",
-      snapchat: profile.username || "friend_snap",
+      phone: profile.phone || "",
+      snapchat: profile.username || "",
       connectedBack: false,
-      incomingRequest: false
+      incomingRequest: false,
+      requestType: "friend_request"
     };
 
     setFriends(prev => [...prev, newFriend]);
@@ -2147,7 +2194,7 @@ export default function App() {
         const outFriendData = {
           id: userSession.uid,
           name: userSession.name || "A Co-celebrant",
-          birthday: userSession.birthday || "1997-11-21",
+          birthday: userSession.birthday || "",
           relationship: "Registry Connection",
           age: (userSession as any).age || "25",
           interests: userSession.interests || ["Gifts", "Parties"],
@@ -2156,7 +2203,8 @@ export default function App() {
           achievements: [],
           phone: (userSession as any).phone || "",
           connectedBack: false,
-          incomingRequest: true
+          incomingRequest: true,
+          requestType: "friend_request"
         };
         await setDoc(doc(db, "users", recipientUid, "friends", userSession.uid), outFriendData, { merge: true });
         
@@ -2164,10 +2212,12 @@ export default function App() {
         await setDoc(doc(db, "users", recipientUid, "notifications", `notif-${Date.now()}`), {
           id: `notif-${Date.now()}`,
           type: "system",
+          recipientUid,
           title: "📥 New Friend Request!",
           message: `${userSession.name} sent you a buddy request sync!`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isRead: false
+          isRead: false,
+          senderUid: userSession.uid
         });
       } catch (err) {
         console.error("Error setting multi-directional friend request:", err);
@@ -2208,10 +2258,12 @@ export default function App() {
         await setDoc(doc(db, "users", recipientUid, "notifications", `notif-${Date.now()}`), {
           id: `notif-${Date.now()}`,
           type: "system",
+          recipientUid,
           title: "🤝 Friend Request Accepted!",
           message: `${userSession.name || "A buddy"} agreed to be friends and is now linked to your circles!`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isRead: false
+          isRead: false,
+          senderUid: userSession.uid
         });
       } catch (e) {
         console.error("Error setting multi-directional friend agreement:", e);
@@ -2451,6 +2503,7 @@ export default function App() {
   };
 
   const sortedUpcoming = getUpcomingSorted();
+  const activeGiftPools = sortedUpcoming.filter((f) => f.id !== "alex");
   const nextTarget = sortedUpcoming.find((f) => f.id !== "alex") || sortedUpcoming[0] || { id: "", name: "No buddies yet", birthday: "2026-01-01", relationship: "", age: "0", avatar: "bg-slate-400", wishlist: [], achievements: [], interests: [] };
   const nextTargetDays = nextTarget ? calculateDaysRemaining(nextTarget.birthday) : 0;
 
@@ -2675,7 +2728,7 @@ export default function App() {
       </aside>
 
       {/* MAIN CONTAINER WORKSPACE */}
-      <main className="flex-1 flex flex-col min-w-0 pb-28 lg:pb-0 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8" id="main-canvas-wrapper">
+      <main className="flex-1 min-h-0 flex flex-col min-w-0 pb-28 lg:pb-0 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-y-auto ios-scroll-safe" id="main-canvas-wrapper">
         
         {/* TOP STATUS BAR ROW */}
         <header className={`bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-4 justify-between items-start lg:items-center gap-4 z-10 text-left relative ${activeSection === "dashboard" ? "flex flex-col lg:flex-row" : "hidden"}`} id="main-workspace-header">
@@ -2807,22 +2860,22 @@ export default function App() {
                     <QrScanner
                       onScan={(scannedProfile) => {
                         const mockProf: MockProfile = {
-                          id: scannedProfile.snapchat || `scanned_${Date.now()}`,
-                          name: scannedProfile.name,
-                          username: scannedProfile.snapchat,
-                          phone: scannedProfile.phone || scannedProfile.whatsapp || "",
-                          birthday: scannedProfile.birthday,
-                          age: scannedProfile.age,
+                          id: scannedProfile.uid || scannedProfile.username || `scanned_${Date.now()}`,
+                          name: scannedProfile.name || scannedProfile.username || "Scanned Contact",
+                          username: scannedProfile.username || "",
+                          phone: "",
+                          birthday: "",
+                          age: "",
                           avatar: "bg-teal-500",
-                          interests: scannedProfile.interests ? scannedProfile.interests.split(",").map((t: string) => t.trim()) : [],
+                          interests: [],
                           wishlistToPost: []
                         };
                         setPendingConnectProfile(mockProf);
                         setShowRelationModal(true);
                         setShowAddProfile(false);
                         setIsQrScannerActive(false);
-                        triggerToast("QR Profile Scanned! ✨", `Choose relationship style with ${scannedProfile.name}.`);
-                        appendLog(`🍀 Scanned profile QR card: Synced local state parameters of ${scannedProfile.name}.`);
+                        triggerToast("QR Profile Scanned! ✨", `Choose relationship style with ${mockProf.name}.`);
+                        appendLog(`🍀 Scanned profile QR card: pending request prepared for ${mockProf.name}.`);
                       }}
                       onClose={() => setIsQrScannerActive(false)}
                     />
@@ -3165,7 +3218,7 @@ export default function App() {
                           name: nameEl.value.trim(),
                           phone: phoneEl?.value.trim() || "+233240001122",
                           email: `${nameEl.value.trim().toLowerCase().replace(/\s+/g, "")}@example.com`,
-                          birthday: bdayEl?.value || "1997-11-21",
+                          birthday: bdayEl?.value || "",
                           avatar: "bg-teal-500",
                           source: "Manual Sim"
                         };
@@ -3408,10 +3461,6 @@ export default function App() {
                 onViewFriend={(friendId) => {
                   setSelectedFriendId(friendId);
                   setActiveSection("registry");
-                }}
-                onOpenGiftAI={(friendId) => {
-                  setSelectedFriendId(friendId);
-                  setActiveSection("ai-lab");
                 }}
               />
 
@@ -4604,7 +4653,7 @@ export default function App() {
                                           <div>
                                             <span className="text-xs font-bold text-slate-800 block">{sc.name}</span>
                                             <span className="text-[9px] text-slate-400 block font-normal font-sans">
-                                              Phonebook Contact &bull; Birthday {sc.birthday ? sc.birthday.substring(5) : "Pending"}
+                                              Not on HBD yet &bull; Private local tracking
                                             </span>
                                           </div>
                                         </div>
@@ -4613,12 +4662,23 @@ export default function App() {
                                             Tracking 🎂
                                           </span>
                                         ) : (
-                                          <button
-                                            onClick={() => handleImportLocalContact(sc as any)}
-                                            className="text-[10.5px] font-bold text-indigo-600 hover:text-indigo-750 bg-indigo-50/60 hover:bg-indigo-100/50 px-3 py-1.5 rounded-xl cursor-pointer"
-                                          >
-                                            Track 🎂
-                                          </button>
+                                          <div className="flex gap-1.5 shrink-0">
+                                            <button
+                                              onClick={() => {
+                                                const inviteText = `Join me on HBD so we can connect birthday reminders: ${window.location.origin}/?user=${encodeURIComponent(userSession?.username || "")}`;
+                                                window.open(`https://wa.me/?text=${encodeURIComponent(inviteText)}`, "_blank", "noopener,noreferrer");
+                                              }}
+                                              className="text-[10.5px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-xl cursor-pointer"
+                                            >
+                                              Invite
+                                            </button>
+                                            <button
+                                              onClick={() => handleImportLocalContact(sc as any)}
+                                              className="text-[10.5px] font-bold text-indigo-600 hover:text-indigo-750 bg-indigo-50/60 hover:bg-indigo-100/50 px-3 py-1.5 rounded-xl cursor-pointer"
+                                            >
+                                              Track
+                                            </button>
+                                          </div>
                                         )}
                                       </div>
                                     );
@@ -4659,10 +4719,20 @@ export default function App() {
                               </div>
                             ) : (
                               (() => {
-                                const matched = getSearchableProfiles().filter(p => 
-                                  p.username.toLowerCase().includes(usernameSearch.toLowerCase()) || 
-                                  p.name.toLowerCase().includes(usernameSearch.toLowerCase())
-                                );
+                                const query = usernameSearch.trim().toLowerCase();
+                                const matched = registryUsers
+                                  .filter(r => r.username?.toLowerCase() === query)
+                                  .map(r => ({
+                                    id: r.uid,
+                                    name: r.name,
+                                    username: r.username,
+                                    phone: r.phone || "",
+                                    birthday: r.birthday || "",
+                                    age: r.age || "",
+                                    avatar: r.avatar || "bg-indigo-500",
+                                    interests: r.interests || [],
+                                    wishlistToPost: r.wishlist || []
+                                  }));
 
                                 if (matched.length === 0) {
                                   return (
@@ -6590,19 +6660,7 @@ export default function App() {
                         
                         <div className="bg-white p-2 rounded-xl shrink-0 shadow-md">
                           <img 
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=115x115&data=${encodeURIComponent(JSON.stringify({
-                              hbd: true,
-                              name: userSession ? userSession.name : "Alex Patel",
-                              birthday: userSession ? userSession.birthday : "1997-06-25",
-                              age: "28",
-                              relationship: "Work Colleague",
-                              phone: userSession && "phone" in userSession ? (userSession as any).phone : "+233241234567",
-                              whatsapp: userSession && "whatsapp" in userSession ? (userSession as any).whatsapp : "+233241234567",
-                              email: userSession ? userSession.email : "alex@example.com",
-                              snapchat: userSession ? userSession.username : "alex_snap",
-                              interests: userSession ? userSession.interests.join(", ") : "Cyberpunk, Mechanic Keyboards",
-                              connectedBack: true
-                            }))}`}
+                            src={getProfileQrUrl(115)}
                             alt="Your HBD Loop Profile QR Code Pass"
                             className="w-[100px] h-[100px] block"
                             referrerPolicy="no-referrer"
@@ -6619,7 +6677,7 @@ export default function App() {
                             <span className="text-[11px] font-mono text-emerald-400 font-bold block">@{userSession ? userSession.username : "alex_patel"}</span>
                           </div>
                           <p className="text-[10px] text-slate-350 leading-relaxed max-w-sm">
-                            Show this private token to other HBD Loop dashboard workspace users. Once scanned, your coordinates will populate instantly with mutual 🤝 connections enabled!
+                            Show this profile QR to other HBD users. Scanning it sends a pending buddy request.
                           </p>
                         </div>
                       </div>
@@ -6952,7 +7010,7 @@ export default function App() {
                     </button>
                   </div>
 
-                  <div className="p-5 space-y-5">
+                  <div className="max-h-[88dvh] overflow-y-auto p-5 space-y-5 ios-scroll-safe">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Full name</label>
@@ -6987,16 +7045,26 @@ export default function App() {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                      <div className="mb-3">
+                        <h4 className="text-sm font-black text-slate-900">Notifications</h4>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Choose how birthday briefings and reminder cues are delivered.</p>
+                      </div>
                       <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-black uppercase tracking-wider text-slate-500">Email Birthday Alerts</span>
+                        <label className="flex items-start gap-3 p-3.5 bg-white rounded-2xl border border-slate-200 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={enableEmailReminders}
                             onChange={(e) => setEnableEmailReminders(e.target.checked)}
-                            className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer"
+                            className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer mt-0.5"
                           />
-                        </div>
+                          <div>
+                            <span className="text-xs font-black text-slate-900 block leading-tight">Email birthday alerts &amp; briefings</span>
+                            <span className="text-[10px] text-slate-500 mt-1 leading-relaxed block">
+                              Send 7-day and 1-day roster summaries to <strong>{userSession?.email || "your email"}</strong>.
+                            </span>
+                          </div>
+                        </label>
 
                         <div className="border-t border-slate-200/80 pt-3">
                           <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Reminder Chime Sound</label>
@@ -7005,23 +7073,23 @@ export default function App() {
                             onChange={(e) => {
                               const selected = e.target.value;
                               setReminderChime(selected);
-                              // Preview sound selection immediately
                               try {
                                 playSynthesizedChimeObj(selected);
                               } catch(err){}
                             }}
                             className="w-full bg-white border border-slate-200 rounded-2xl px-3 py-2 text-xs font-semibold text-slate-900 outline-none focus:border-indigo-500 cursor-pointer mt-1"
                           >
-                            <option value="default">🔔 Joyful Ping (Default)</option>
-                            <option value="bell">🔔 Classic Bell Resonance</option>
-                            <option value="marimba">🔔 Elegant Marimba Melody</option>
-                            <option value="digital">🔔 Modern Bubble Pop</option>
-                            <option value="sweet">🔔 Gentle Glockenspiel</option>
+                            <option value="default">Joyful Ping (Default)</option>
+                            <option value="bell">Classic Bell Resonance</option>
+                            <option value="marimba">Elegant Marimba Melody</option>
+                            <option value="digital">Modern Bubble Pop</option>
+                            <option value="sweet">Gentle Glockenspiel</option>
                           </select>
                         </div>
                       </div>
+                    </div>
 
-                      <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 space-y-3">
+                    <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 space-y-3">
                         <div>
                           <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Region</label>
                           <select
@@ -7052,53 +7120,30 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Security Update Zone (Requires active authentication) */}
+                    {/* Password Recovery Zone (Requires active authentication) */}
                     <div className="bg-slate-50 border border-slate-250 rounded-3xl p-4 md:p-5 space-y-3 text-left">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-black uppercase tracking-wider text-slate-700">Security Credentials Zone</span>
+                        <span className="text-xs font-black uppercase tracking-wider text-slate-700">Password</span>
                         <div className="h-2 w-2 rounded-full bg-indigo-500 animate-pulse" />
                       </div>
                       <p className="text-[11px] text-slate-500">
-                        To update your active login password, please input your current credentials to securely re-verify your workspace session.
+                        Send a secure password reset link to the email attached to this account. Google-linked accounts can use this to add a password.
                       </p>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Current Password</label>
-                          <input
-                            type="password"
-                            value={currentPasswordState}
-                            onChange={(e) => setCurrentPasswordState(e.target.value)}
-                            placeholder="••••••"
-                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 outline-none focus:border-indigo-500 font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">New Secure Password</label>
-                          <input
-                            type="password"
-                            value={newPasswordState}
-                            onChange={(e) => setNewPasswordState(e.target.value)}
-                            placeholder="Min. 6 characters"
-                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 outline-none focus:border-indigo-500 font-mono"
-                          />
-                        </div>
-                      </div>
 
                       <div className="flex justify-end pt-1">
                         <button
                           type="button"
-                          onClick={handleUpdatePassword}
-                          disabled={isUpdatingPassword}
-                          className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white text-[11px] font-font bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-2"
+                          onClick={handlePasswordReset}
+                          disabled={isPasswordResetLoading || !userSession?.email}
+                          className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white text-[11px] font-extrabold px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-2"
                         >
-                          {isUpdatingPassword ? (
+                          {isPasswordResetLoading ? (
                             <>
                               <div className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                              <span>Updating...</span>
+                              <span>Sending...</span>
                             </>
                           ) : (
-                            "Update Password"
+                            "Set / Reset Password"
                           )}
                         </button>
                       </div>
@@ -7342,85 +7387,148 @@ export default function App() {
                   <Activity className="w-3.5 h-3.5 text-indigo-505" />
                   <span>Sent Gifts ({sentGifts.length})</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setGiftStoreTab("pools")}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    giftStoreTab === "pools"
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  <Gift className="w-3.5 h-3.5 text-violet-505" />
+                  <span>Pools ({activeGiftPools.length})</span>
+                </button>
               </div>
 
               {/* TAB 1: BOUTIQUE GALLERY */}
               {giftStoreTab === "gallery" && (
                 <div className="space-y-6">
-                  {/* Grid layout */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {GIFT_INVENTORY.map((item) => (
-                      <motion.div
-                        key={item.id}
-                        whileHover={{ scale: 1.02, y: -4 }}
-                        whileTap={{ scale: 0.98 }}
-                        transition={{ type: "spring", stiffness: 350, damping: 20 }}
-                        className="bg-white border border-rose-100 hover:border-rose-300 shadow-xs p-6 rounded-[2rem] flex flex-col justify-between transition-all group hover:shadow-lg relative overflow-hidden text-left cursor-pointer"
-                      >
-                        <div className="absolute top-0 right-0 w-24 h-24 bg-rose-50/50 rounded-bl-full pointer-events-none -mr-4 -mt-4 transition-colors group-hover:bg-rose-100/30" />
-                        <div className="space-y-4">
-                          <div className="flex justify-between items-start">
-                            <span className="text-3xl filter drop-shadow-xs">{item.emoji}</span>
-                            <span className="bg-rose-50 text-rose-700 text-[9px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider border border-rose-100/40">
-                              {item.category}
-                            </span>
+                  {/* Swipeable single-gift carousel */}
+                  <motion.div
+                    key={selectedStoreGift.id}
+                    initial={{ opacity: 0, x: 24 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -24 }}
+                    onPointerDown={(e) => setGiftSwipeStartX(e.clientX)}
+                    onPointerUp={(e) => {
+                      if (giftSwipeStartX === null) return;
+                      const delta = e.clientX - giftSwipeStartX;
+                      if (Math.abs(delta) > 48) {
+                        setGiftCarouselIndex((prev) => (delta < 0
+                          ? (prev + 1) % GIFT_INVENTORY.length
+                          : (prev - 1 + GIFT_INVENTORY.length) % GIFT_INVENTORY.length));
+                      }
+                      setGiftSwipeStartX(null);
+                    }}
+                    className="bg-white border border-rose-100 shadow-xs p-5 md:p-7 rounded-[2rem] text-left relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 right-0 w-40 h-40 bg-rose-50/70 rounded-bl-full pointer-events-none -mr-8 -mt-8" />
+                    <div className="relative z-10">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <span className="bg-rose-50 text-rose-700 text-[9px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider border border-rose-100/40">
+                            {selectedStoreGift.category}
+                          </span>
+                          <h4 className="font-black text-2xl text-zinc-900 mt-4">{selectedStoreGift.name}</h4>
+                          <p className="text-sm text-zinc-500 mt-2 leading-relaxed">{selectedStoreGift.description}</p>
+                        </div>
+                        <div className="text-5xl filter drop-shadow-xs shrink-0">{selectedStoreGift.emoji}</div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-7">
+                        <div className="md:col-span-2 space-y-3">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-slate-400">Contribution amount</label>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-black text-slate-500">GHS</span>
+                            <input
+                              type="number"
+                              min={giftAmountMin}
+                              max={giftAmountMax}
+                              value={giftContributionAmount}
+                              onChange={(e) => setGiftContributionAmount(e.target.value)}
+                              className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-mono outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+                            />
                           </div>
-                          <div>
-                            <h4 className="font-black text-base text-zinc-900 group-hover:text-rose-700 transition-colors flex items-center gap-1.5">
-                              <span>{item.name}</span>
-                            </h4>
-                            <p className="text-[11px] text-zinc-500 font-sans mt-1.5 leading-relaxed">
-                              {item.description}
-                            </p>
-                          </div>
+                          <p className="text-[11px] text-slate-500">Choose any amount from GHS {giftAmountMin} to GHS {giftAmountMax}.</p>
                         </div>
 
-                        <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-between">
+                        <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4 flex flex-col justify-between">
                           <div>
-                            <span className="text-[10px] uppercase font-bold text-slate-400 block pb-0.5">Unit Cost</span>
-                            <span className="text-base font-black text-rose-600 font-mono">
-                              {getFormattedPrice(item.usdPrice)}
-                            </span>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Suggested unit</span>
+                            <span className="text-lg font-black text-rose-600 font-mono mt-1 block">{getFormattedPrice(selectedStoreGift.usdPrice)}</span>
                           </div>
-                          <button
-                            onClick={() => {
-                              setCustomGiftStoreItem({ id: item.id, name: item.name, type: item.type, usdPrice: item.usdPrice });
-                              
-                              // Select default recipient
-                              if (friends.length > 0) {
-                                setGiftRecipientId(friends[0].id);
-                                
-                                // Default reveal date to friend's birthday (mapped to next year occurrence or today)
-                                const yr = new Date().getFullYear();
-                                const bdy = friends[0].birthday;
-                                if (bdy) {
-                                  const parts = bdy.split("-");
-                                  if (parts.length === 3) {
-                                    setGiftRevealDate(`${yr}-${parts[1]}-${parts[2]}`);
-                                  } else {
-                                    setGiftRevealDate(getTodayDateString());
-                                  }
-                                } else {
-                                  setGiftRevealDate(getTodayDateString());
-                                }
+                          <div className="flex items-center justify-between gap-2 mt-4">
+                            <button
+                              type="button"
+                              onClick={() => setGiftCarouselIndex((prev) => (prev - 1 + GIFT_INVENTORY.length) % GIFT_INVENTORY.length)}
+                              className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-black"
+                              aria-label="Previous gift"
+                            >
+                              ‹
+                            </button>
+                            <div className="flex gap-1.5">
+                              {GIFT_INVENTORY.map((_, index) => (
+                                <span
+                                  key={index}
+                                  className={`h-1.5 rounded-full transition-all ${index === giftCarouselIndex ? "w-6 bg-rose-500" : "w-1.5 bg-slate-200"}`}
+                                />
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setGiftCarouselIndex((prev) => (prev + 1) % GIFT_INVENTORY.length)}
+                              className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-black"
+                              aria-label="Next gift"
+                            >
+                              ›
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                        <button
+                          onClick={() => {
+                            const amount = Number(giftContributionAmount);
+                            if (!amount || amount < giftAmountMin || amount > giftAmountMax) {
+                              triggerToast("Invalid Amount", `Enter GHS ${giftAmountMin} to GHS ${giftAmountMax}.`);
+                              return;
+                            }
+                            setCustomGiftStoreItem({ id: selectedStoreGift.id, name: selectedStoreGift.name, type: selectedStoreGift.type, usdPrice: selectedStoreGift.usdPrice });
+                            if (friends.length > 0) {
+                              setGiftRecipientId(friends[0].id);
+                              const yr = new Date().getFullYear();
+                              const bdy = friends[0].birthday;
+                              if (bdy) {
+                                const parts = bdy.split("-");
+                                setGiftRevealDate(parts.length === 3 ? `${yr}-${parts[1]}-${parts[2]}` : getTodayDateString());
                               } else {
-                                setGiftRecipientId("");
                                 setGiftRevealDate(getTodayDateString());
                               }
-                              setGiftRecipientMessage(`Sending this lovely ${item.emoji} ${item.name} with warm celebration wishes! ✨🎁`);
-                              setGiftPaymentMethod("momo");
-                            }}
-                            className="bg-indigo-600 hover:bg-rose-600 text-white font-black text-xs px-4 py-2.5 rounded-xl cursor-pointer transition-all active:scale-95 group-hover:shadow-md"
-                          >
-                            Send {item.emoji}
-                          </button>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
+                            } else {
+                              setGiftRecipientId("");
+                              setGiftRevealDate(getTodayDateString());
+                            }
+                            setGiftRecipientMessage(`Sending ${selectedStoreGift.emoji} ${selectedStoreGift.name} with a GHS ${amount.toFixed(2)} celebration gift.`);
+                            setGiftPaymentMethod("momo");
+                          }}
+                          className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs px-5 py-3.5 rounded-2xl cursor-pointer transition-all active:scale-[0.98] shadow-sm"
+                        >
+                          Customize &amp; Send
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGiftCarouselIndex((prev) => (prev + 1) % GIFT_INVENTORY.length)}
+                          className="px-5 py-3.5 rounded-2xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-black text-xs"
+                        >
+                          Swipe next gift
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
 
-                  {/* Aesthetic Guarantee Alert Card */}
-                  <div className="bg-indigo-50 border border-indigo-100 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center gap-4 text-left">
+                  <div className="bg-rose-50 border border-rose-100 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center gap-4 text-left">
                     <div className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center font-black shrink-0 animate-pulse">
                       ℹ️
                     </div>
@@ -7434,7 +7542,76 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB 2: SENT & RECEIVED GIFT LEDGERS */}
+              {/* TAB 2: ACTIVE GIFT POOLS */}
+              {giftStoreTab === "pools" && (
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 space-y-5 text-left shadow-xs">
+                  <div>
+                    <h4 className="font-extrabold text-sm text-zinc-900 flex items-center gap-2">
+                      <Gift className="w-4.5 h-4.5 text-violet-600" />
+                      <span>Active Gift Pools</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Browse every tracked buddy with an upcoming milestone. Gift-pool actions stay out of Home and live here or inside an individual buddy profile.
+                    </p>
+                  </div>
+
+                  {activeGiftPools.length === 0 ? (
+                    <div className="border-2 border-dashed border-slate-200 bg-slate-50/50 rounded-2xl p-10 text-center">
+                      <div className="text-4xl">🎁</div>
+                      <h5 className="text-xs font-black text-zinc-700 mt-3">No active pools yet</h5>
+                      <p className="text-[10px] text-slate-400 mt-1 max-w-sm mx-auto">
+                        Add a buddy with an upcoming birthday to create a pool entry here.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {activeGiftPools.map((friend) => (
+                        <div key={friend.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-11 h-11 rounded-2xl ${friend.avatar || "bg-indigo-500"} text-white flex items-center justify-center font-black text-sm shrink-0`}>
+                              {friend.name.split(" ").map((n) => n[0] || "").slice(0, 2).join("")}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-black text-slate-900 truncate">{friend.name}</p>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                {formatBirthdayDate(friend.birthday)} • {calculateDaysRemaining(friend.birthday)} days left
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedFriendId(friend.id);
+                                setActiveSection("registry");
+                                window.scrollTo({ top: 0, behavior: "smooth" });
+                              }}
+                              className="text-[11px] font-black text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-100 px-3 py-2 rounded-xl"
+                            >
+                              Manage
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedFriendId(friend.id);
+                                setGiftStoreTab("gallery");
+                                setActiveSection("gift-store");
+                                triggerToast("Gift Pool Opened 🎁", `Choose a gift for ${friend.name}.`);
+                                window.scrollTo({ top: 0, behavior: "smooth" });
+                              }}
+                              className="text-[11px] font-black text-white bg-rose-600 hover:bg-rose-700 px-3 py-2 rounded-xl"
+                            >
+                              Send gift
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 3: SENT & RECEIVED GIFT LEDGERS */}
               {giftStoreTab === "ledger" && (
                 <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 space-y-6 text-left shadow-xs">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-2 border-b border-slate-100">
@@ -7896,9 +8073,9 @@ export default function App() {
                     <Sparkles className="w-6 h-6 text-indigo-400" />
                     <span>Plans</span>
                   </h3>
-                  <p className="text-xs text-indigo-200 mt-1.5 leading-relaxed max-w-xl font-sans">
-                    Manage your subscription level, toggle email reminders settings, customize handles, or bulk-import members for corporate campaigns.
-                  </p>
+                    <p className="text-xs text-indigo-200 mt-1.5 leading-relaxed max-w-xl font-sans">
+                      Manage your subscription level, billing region, and payment method.
+                    </p>
                 </div>
 
                 {/* Two-Column Workspace */}
@@ -7946,56 +8123,56 @@ export default function App() {
                     </div>
 
                     {/* TRY HBD PRO - ELITE PROMOTIONAL LAYOUT */}
-                    <div className="bg-gradient-to-br from-indigo-900 via-indigo-950 to-slate-950 rounded-3xl p-5 md:p-6 text-white border border-indigo-500/30 shadow-xl relative overflow-hidden font-sans">
-                      <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-indigo-600/10 pointer-events-none blur-3xl opacity-40" />
+                    <div className="rounded-3xl p-5 md:p-6 border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-orange-50 shadow-xs relative overflow-hidden font-sans">
+                      <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-violet-200/20 pointer-events-none blur-3xl opacity-60" />
                       <div className="flex flex-col md:flex-row items-stretch justify-between gap-6 relative z-10">
                         <div className="space-y-4 max-w-md">
                           <div className="space-y-1">
-                            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-indigo-500/20 border border-indigo-400/20 rounded-full text-[9px] uppercase tracking-widest font-black text-indigo-300">
-                              ⚡ Elite Upgrade
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-violet-100 border border-violet-200 rounded-full text-[9px] uppercase tracking-widest font-black text-violet-700">
+                              Pro upgrade
                             </div>
-                            <h4 className="text-lg md:text-xl font-black text-white flex items-center gap-1.5">
+                            <h4 className="text-lg md:text-xl font-black text-slate-900 flex items-center gap-1.5">
                               <span>Try HBD Pro</span>
-                              <span className="text-amber-400">★</span>
+                              <span className="text-amber-500">★</span>
                             </h4>
-                            <p className="text-[11px] text-indigo-200 leading-normal">
-                              Unlock automated milestones power-ups and elevate your social capital by coordinating group gifting loops smoothly.
+                            <p className="text-[11px] text-slate-600 leading-normal">
+                              Unlock automated milestone tools and coordinate group gifting loops with less manual work.
                             </p>
                           </div>
 
                           {/* Advantages List */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-[10.5px] font-semibold text-slate-300">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-[10.5px] font-semibold text-slate-600">
                             <div className="flex items-center gap-2">
-                              <span className="text-indigo-400 text-xs font-bold">✦</span>
+                              <span className="text-violet-600 text-xs font-bold">✦</span>
                               <span>Unlimited Milestone Tracking</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-indigo-400 text-xs font-bold">✦</span>
+                              <span className="text-violet-600 text-xs font-bold">✦</span>
                               <span>Group Gifting Pool Activation</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-indigo-400 text-xs font-bold">✦</span>
+                              <span className="text-violet-600 text-xs font-bold">✦</span>
                               <span>Custom Push Alarm Reminders</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-indigo-400 text-xs font-bold">✦</span>
+                              <span className="text-violet-600 text-xs font-bold">✦</span>
                               <span>Premium Group Card Designs</span>
                             </div>
                           </div>
                         </div>
 
                         {/* Payment / Pricing Actions Inline */}
-                        <div className="flex flex-col justify-center bg-slate-900/40 p-4 border border-white/5 rounded-2xl md:w-56 shrink-0 text-left space-y-3">
+                        <div className="flex flex-col justify-center bg-white/80 p-4 border border-slate-200 rounded-2xl md:w-56 shrink-0 text-left space-y-3 shadow-sm">
                           <div>
                             <span className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400 block">Pro Premium Price</span>
                             <div className="flex items-baseline gap-1 mt-0.5">
-                              <span className="text-xl md:text-2xl font-black text-white font-sans">
+                              <span className="text-xl md:text-2xl font-black text-slate-900 font-sans">
                                 {isGhana ? (isYearly ? "GHS 99" : "GHS 10") : isAfrica ? (isYearly ? "$14" : "$1.50") : (isYearly ? "$29" : "$3")}
                               </span>
-                              <span className="text-[9px] text-indigo-300">/{isYearly ? "yr" : "mo"}</span>
+                              <span className="text-[9px] text-slate-500">/{isYearly ? "yr" : "mo"}</span>
                             </div>
                             {isYearly && (
-                              <span className="text-[8px] bg-emerald-505/20 text-emerald-450 bg-emerald-500/20 text-emerald-400 font-extrabold px-1.5 py-0.2 rounded mt-0.5 inline-block">
+                              <span className="text-[8px] bg-emerald-50 text-emerald-700 border border-emerald-100 font-extrabold px-1.5 py-0.2 rounded mt-0.5 inline-block">
                                 Saves 19%+ with Annual billing
                               </span>
                             )}
@@ -8005,7 +8182,7 @@ export default function App() {
                             type="button"
                             disabled={isPaymentLoading}
                             onClick={() => handlePaymentUpgrade("pro")}
-                            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[11px] py-2.5 px-3 rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-indigo-950/50 hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                            className="w-full bg-violet-600 hover:bg-violet-700 text-white font-extrabold text-[11px] py-2.5 px-3 rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm hover:shadow-md hover:scale-[1.02] active:scale-95 disabled:opacity-50"
                           >
                             {isPaymentLoading ? (
                               <>
@@ -8022,7 +8199,7 @@ export default function App() {
 
                           <div className="text-[8.5px] text-slate-500 leading-tight flex items-start gap-1">
                             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                            <span className="leading-tight">Webhooks encrypted to: <code className="text-[8px] break-all font-mono font-bold block text-indigo-400">https://mybuddiesbirthday.up.railway.app/webhook/paystack</code></span>
+                            <span className="leading-tight">Webhooks encrypted to: <code className="text-[8px] break-all font-mono font-bold block text-violet-700">https://mybuddiesbirthday.up.railway.app/webhook/paystack</code></span>
                           </div>
                         </div>
                       </div>
@@ -8227,106 +8404,15 @@ export default function App() {
                           }}
                           className="px-4.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black shadow-lg transition-all cursor-pointer"
                         >
-                          Process &amp; Bulk Import Roster ({bulkImportText.split("\n").filter(l => l.trim().length > 0).length} records)
+                          Process &amp; Bulk Import Roster ({bulkImportText.split("\n").filter((l) => l.trim().length > 0).length} records)
                         </button>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Column 2: User Settings & Alerts Config (Span 5) */}
-                <div className="lg:col-span-12 xl:col-span-5 bg-white rounded-[2rem] border border-slate-200 p-6 md:p-8 shadow-xs space-y-6">
-                  <div>
-                    <h4 className="font-extrabold text-sm text-slate-900 uppercase tracking-wide flex items-center gap-2">
-                      🛠 flex 🛠️ Personal Credentials &amp; Alerts Settings
-                    </h4>
-                    <p className="text-xs text-slate-500 font-sans">
-                      Inputs are taken during signup or profile sessions and used to customize pre-filled greeting links.
-                    </p>
-                  </div>
-
-                  {/* Form fields for settings */}
-                  <div className="space-y-4 font-sans">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">My Username</label>
-                      <input 
-                        type="text" 
-                        value={snapchatUsername}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setSnapchatUsername(val);
-                          if (userSession) {
-                            const nextSess = { ...userSession, snapchatUsername: val };
-                            setUserSession(nextSess);
-                            localStorage.setItem("birthday_authenticated_user", JSON.stringify(nextSess));
-                          }
-                          triggerToast("Settings Update", "Custom username updated.");
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-100 focus:outline-[#818CF8] font-mono text-zinc-850"
-                        placeholder="alex_snap"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">My WhatsApp Phone</label>
-                      <input 
-                        type="text" 
-                        value={whatsappNumber}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setWhatsappNumber(val);
-                          if (userSession) {
-                            const nextSess = { ...userSession, whatsappNumber: val };
-                            setUserSession(nextSess);
-                            localStorage.setItem("birthday_authenticated_user", JSON.stringify(nextSess));
-                          }
-                          triggerToast("Settings Update", "Custom WhatsApp phone updated.");
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-100 focus:outline-[#818CF8] font-mono text-zinc-850"
-                        placeholder="+233241234567"
-                      />
-                    </div>
-
-                    {/* Checkbox toggle option alerts */}
-                    <div className="pt-2 border-t border-slate-100">
-                      <label className="flex items-start gap-3 p-3.5 bg-slate-50 hover:bg-slate-100/50 rounded-xl border border-slate-200 transition-all cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={enableEmailReminders}
-                          onChange={(e) => {
-                            const val = e.target.checked;
-                            setEnableEmailReminders(val);
-                            if (userSession) {
-                              const nextSess = { ...userSession, enableEmailReminders: val };
-                              setUserSession(nextSess);
-                              localStorage.setItem("birthday_authenticated_user", JSON.stringify(nextSess));
-                            }
-                            triggerToast(
-                              val ? "Email Alerts Enabled 📧" : "Email Alerts Disabled 🔇", 
-                              val ? "Warnings are active and will record under notification archives 7 days and 1 day prior." : "Alerts will remain strictly in-app desktop notifications."
-                            );
-                            appendLog(`⚙️ Config: Email alert warning dispatcher is set to ${val ? "active" : "inactive"}.`);
-                          }}
-                          className="indigo-checkbox w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 mt-0.5 cursor-pointer"
-                        />
-                        <div>
-                          <span className="text-xs font-black text-slate-900 block leading-tight">Enable Roster Email Alerts &amp; Briefings</span>
-                          <span className="text-[10px] text-slate-500 mt-1 leading-relaxed block">
-                            Once enabled, a digest of 7-day warnings and 1-day warnings will be compiled for your registered buddies and sent to <strong>{userSession?.email || "thefitfola@gmail.com"}</strong>.
-                          </span>
-                        </div>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Operational Status overview */}
-                  <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl text-[10.5px] text-slate-550 leading-relaxed font-semibold">
-                    💡 <strong>Active Warnings:</strong> When you modify settings or register others, the load checker triggers alerts automatically. Open your notification drawer in the top right header navigation bar to inspect active alerting logs and historical dispatch archives.
-                  </div>
                 </div>
-
               </div>
-            </div>
             );
           })()}
 
@@ -8670,19 +8756,7 @@ export default function App() {
 
                 <div className="bg-white p-2.5 rounded-2xl shadow-lg border border-white/20">
                   <img 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(JSON.stringify({
-                      hbd: true,
-                      name: userSession ? userSession.name : "Alex Patel",
-                      birthday: userSession ? userSession.birthday : "1997-06-25",
-                      age: "28",
-                      relationship: "Work Colleague",
-                      phone: userSession && "phone" in userSession ? (userSession as any).phone : "+233241234567",
-                      whatsapp: userSession && "whatsapp" in userSession ? (userSession as any).whatsapp : "+233241234567",
-                      email: userSession ? userSession.email : "alex@example.com",
-                      snapchat: userSession ? userSession.username : "alex_snap",
-                      interests: userSession ? userSession.interests.join(", ") : "Cyberpunk, Mechanic Keyboards",
-                      connectedBack: true
-                    }))}`}
+                    src={getProfileQrUrl(200)}
                     alt="Scan HBD Loop QR Handshake"
                     className="w-[160px] h-[160px] block"
                     referrerPolicy="no-referrer"
@@ -8694,7 +8768,7 @@ export default function App() {
                   <p className="text-xs text-indigo-300 font-medium">@{userSession ? userSession.username : "alex_patel"}</p>
                 </div>
                 <p className="text-[10px] text-slate-300 leading-relaxed font-normal max-w-[280px]">
-                  Point a camera or standard QR scanner here to sync profiles with 🤝 HBD Loop mutual connect parameters instantly!
+                  Scan this profile QR to send a pending buddy request. Acceptance is required before either roster is linked.
                 </p>
               </div>
 

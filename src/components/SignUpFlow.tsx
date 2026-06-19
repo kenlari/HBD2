@@ -11,7 +11,7 @@ import {
   sendEmailVerification,
   updatePassword
 } from "firebase/auth";
-import { doc, getDoc, setDoc, query, collection, where, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs, query, where } from "firebase/firestore";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -74,6 +74,10 @@ export const COUNTRIES = [
   { code: 'SN', name: 'Senegal', dialCode: '+221', currency: 'XOF', flag: '🇸🇳' },
   { code: 'CM', name: 'Cameroon', dialCode: '+237', currency: 'XAF', flag: '🇨🇲' }
 ];
+
+export function normalizeUsername(value: string) {
+  return value.trim().toLowerCase().replace(/^@/, "").replace(/\s+/g, "_");
+}
 
 const INTEREST_OPTIONS = [
   { label: "Photography", emoji: "📸" },
@@ -226,8 +230,34 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
     ]);
   };
 
+  useEffect(() => {
+    const targetedUsername = normalizeUsername(username);
+    if (targetedUsername.length < 3) {
+      setUsernameError("");
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsCheckingUsername(true);
+      setUsernameError("");
+      try {
+        const usernameDocSnap = await withTimeout(getDoc(doc(db, "usernames", targetedUsername)), 2500);
+        if (usernameDocSnap.exists()) {
+          setUsernameError("This username handle is already claimed.");
+        }
+      } catch (err: any) {
+        console.error("Username availability check error:", err);
+        setUsernameError("Could not verify username uniqueness right now.");
+      } finally {
+        setIsCheckingUsername(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timeoutId);
+  }, [username]);
+
   const handleUsernameNext = async () => {
-    const targetedUsername = username.trim().toLowerCase().replace(/^@/, "");
+    const targetedUsername = normalizeUsername(username);
     if (targetedUsername.length < 3) {
       setUsernameError("Username should be at least 3 characters.");
       triggerToast("Invalid Handle ❌", "Username should be at least 3 characters.");
@@ -247,17 +277,6 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
         return;
       }
 
-      // 2. Query users collection as dynamic verification safeguard
-      const usernameQuery = query(collection(db, "users"), where("username", "==", targetedUsername));
-      const querySnapshot = await withTimeout(getDocs(usernameQuery), 2500);
-      
-      if (!querySnapshot.empty) {
-        setUsernameError("This username handle is already claimed.");
-        triggerToast("Username Taken ❌", "This username handle is already claimed.");
-        setIsCheckingUsername(false);
-        return;
-      }
-      
       setIsCheckingUsername(false);
       go(2);
     } catch (err: any) {
@@ -314,14 +333,16 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
     setPhoneError("");
     try {
       const phoneQuery1 = query(collection(db, "users"), where("phone", "==", formattedPhone));
-      const phoneQuery2 = query(collection(db, "users"), where("phoneNumber", "==", formattedPhone));
+      const phoneQuery2 = query(collection(db, "users"), where("whatsapp", "==", formattedPhone));
+      const phoneQuery3 = query(collection(db, "users"), where("phoneNumber", "==", formattedPhone));
       
-      const [snap1, snap2] = await withTimeout(Promise.all([
+      const [snap1, snap2, snap3] = await withTimeout(Promise.all([
         getDocs(phoneQuery1),
-        getDocs(phoneQuery2)
+        getDocs(phoneQuery2),
+        getDocs(phoneQuery3)
       ]), 3000);
       
-      if (!snap1.empty || !snap2.empty) {
+      if (!snap1.empty || !snap2.empty || !snap3.empty) {
         setPhoneError("This phone number is already linked to an account.");
         triggerToast("Phone Registered ❌", "This phone number is already registered.");
         setIsCheckingPhone(false);
@@ -422,14 +443,14 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
     
     // Check if we are already authenticated via passwordless email link
     const currentFirebaseUser = auth.currentUser;
-    const fallbackUid = currentFirebaseUser?.uid || "local_" + Math.random().toString(36).substring(2, 11);
+    const fallbackUid = currentFirebaseUser?.uid || "";
     let uid = fallbackUid;
 
     // Pre-construct SignUpSession object
     const session: SignUpSession = {
       uid,
       name: name.trim(),
-      username: username.trim().toLowerCase().replace(/^@/, ""),
+      username: normalizeUsername(username),
       email: email.trim().toLowerCase(),
       birthday,
       avatar,
@@ -540,18 +561,18 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
               type="text"
               value={username}
               onChange={e => {
-                setUsername(e.target.value.toLowerCase().replace(/\s+/g, "_"));
+                setUsername(normalizeUsername(e.target.value));
                 setUsernameError("");
               }}
               onKeyDown={async (e) => {
-                if (e.key === "Enter" && username.trim().length >= 3 && !isCheckingUsername) {
+                if (e.key === "Enter" && normalizeUsername(username).length >= 3 && !isCheckingUsername) {
                    await handleUsernameNext();
                 }
               }}
               placeholder="username_handle"
               className={`w-full bg-white border ${usernameError ? 'border-rose-500' : 'border-[#E5E1D8]'} text-[#1E293B] text-lg font-semibold rounded-2xl pl-10 pr-12 py-4 outline-none focus:border-indigo-600 focus:bg-white focus:ring-1 focus:ring-indigo-600 transition-all placeholder:text-slate-450 font-mono`}
             />
-            {username.trim().length >= 3 && !isCheckingUsername && !usernameError && (
+            {normalizeUsername(username).length >= 3 && !isCheckingUsername && !usernameError && (
               <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
@@ -587,7 +608,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
           )}
         </div>
       ),
-      canNext: username.trim().length >= 3 && !isCheckingUsername,
+      canNext: normalizeUsername(username).length >= 3 && !isCheckingUsername && !usernameError,
       onNext: handleUsernameNext,
     },
 

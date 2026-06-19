@@ -1,5 +1,5 @@
-import { initializeApp } from "firebase/app";   // <-- this was missing
-import { getAuth } from "firebase/auth";
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 import appletConfig from "../firebase-applet-config.json";
@@ -13,8 +13,24 @@ const firebaseConfig = {
   appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || appletConfig.appId
 };
 
-console.log("Firebase config:", firebaseConfig); // temporary debug
-
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+export function isStandalonePwa() {
+  return typeof window !== "undefined" && (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (window.navigator as any).standalone === true
+  );
+}
+
+export async function signInWithGoogle(authInstance = auth) {
+  const provider = new GoogleAuthProvider();
+
+  if (isStandalonePwa()) {
+    await signInWithRedirect(authInstance, provider);
+    return null;
+  }
+
+  return signInWithPopup(authInstance, provider);
+}

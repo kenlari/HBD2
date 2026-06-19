@@ -1,5 +1,28 @@
 @import "tailwindcss";
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+#hbd-app-root {
+  min-height: 100dvh;
+}
+
+.ios-scroll-safe {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+@media (display-mode: standalone) {
+  #hbd-app-root {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+}
+
+
 /* -------------------------------------------------------------
    GLOBAL THEMING ENHANCEMENT FOR CONSISTENT DARK/LIGHT VIEWS
 ------------------------------------------------------------- */

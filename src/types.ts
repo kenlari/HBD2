@@ -31,6 +31,8 @@ export interface Friend {
   email?: string;
   connectedBack?: boolean; // Must be true to view their private data
   incomingRequest?: boolean; // True if friend request is sent TO us and is pending accept
+  requestType?: "friend_request" | "local_celebrant";
+  notOnHbd?: boolean;
 }
 
 export interface GiftSuggestion {
@@ -54,6 +56,7 @@ export interface InAppNotification {
   title: string;
   message: string;
   friendId?: string;
+  senderUid?: string;
   timestamp: string;
   isRead: boolean;
 }

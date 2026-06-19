@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sparkles, X, Mail, Lock, Eye, EyeOff, Cake, User, Phone, ArrowLeft, ArrowRight, ShieldAlert } from "lucide-react";
-import { auth, db } from "../firebase";
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, sendPasswordResetEmail } from "firebase/auth";
+import { auth, db, signInWithGoogle } from "../firebase";
+import { getRedirectResult, signInWithEmailAndPassword, sendPasswordResetEmail, type User as FirebaseUser } from "firebase/auth";
 import { doc, getDoc, setDoc, query, collection, where, getDocs } from "firebase/firestore";
 import { COUNTRIES } from "./SignUpFlow";
 
@@ -57,9 +57,9 @@ export function TypingEffect() {
 
   return (
     <div className="h-6 flex items-center justify-center font-mono">
-      <span className="text-xs font-black text-indigo-600 tracking-wider uppercase">
+      <span className="text-xs font-black text-slate-900 tracking-wider uppercase">
         {words[index].substring(0, subIndex)}
-        <span className="animate-pulse ml-0.5 font-bold">|</span>
+        <span className="animate-pulse ml-0.5 font-bold text-slate-900">|</span>
       </span>
     </div>
   );
@@ -110,6 +110,69 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
     ]);
   };
 
+  const loginWithProfile = (profile: LoginSession, title: string, message: string) => {
+    localStorage.setItem("birthday_authenticated_user", JSON.stringify(profile));
+    onLogin(profile);
+    triggerToast(title, message);
+  };
+
+  const showProfileFallback = (firebaseUser: FirebaseUser) => {
+    setPendingUser({
+      uid: firebaseUser.uid,
+      email: firebaseUser.email || "",
+      name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "HBD Companion"
+    });
+
+    setFallbackName(firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "");
+    setFallbackUsername("");
+    setFallbackBirthday("");
+    setFallbackPhone("");
+    setFallbackCountryCode("GH");
+    setFallbackUsernameError("");
+    setFallbackPhoneError("");
+
+    setShowProfileSetupFallback(true);
+    triggerToast("Finalize Account ⚙️", "Please complete your HBD profile parameters to get started.");
+  };
+
+  const syncGoogleProfile = async (firebaseUser: FirebaseUser) => {
+    const userDocRef = doc(db, "users", firebaseUser.uid);
+    const userDocSnap = await getDoc(userDocRef);
+
+    if (userDocSnap.exists()) {
+      const profile = userDocSnap.data() as LoginSession;
+      loginWithProfile(profile, "Welcome Back! 🎉", `Successfully established credentials for ${profile.name}!`);
+      return;
+    }
+
+    showProfileFallback(firebaseUser);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getRedirectResult(auth)
+      .then((result) => {
+        if (cancelled || !result?.user) return;
+        syncGoogleProfile(result.user);
+      })
+      .catch((error: any) => {
+        if (cancelled) return;
+        console.error("Google redirect setup error: ", error);
+        let errorMsg = "Could not synchronize Google credentials. Please try again.";
+        if (error.code === "auth/unauthorized-domain" || error.message?.includes("unauthorized-domain")) {
+          errorMsg = "Unauthorized Domain address in Firebase settings.";
+          setUnauthorizedDomainError(window.location.hostname);
+        }
+        setValidationError(errorMsg);
+        triggerToast("Access Denied ❌", errorMsg);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onLogin, triggerToast]);
+
   // Switch clean states
   const resetAllStates = () => {
     setEmailOrUsername("");
@@ -132,38 +195,12 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
     setResetNotice(null);
     setIsLoading(true);
     try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const firebaseUser = result.user;
-      
-      const userDocRef = doc(db, "users", firebaseUser.uid);
-      const userDocSnap = await getDoc(userDocRef);
-
-      if (userDocSnap.exists()) {
-        const profile = userDocSnap.data() as LoginSession;
-        localStorage.setItem("birthday_authenticated_user", JSON.stringify(profile));
-        onLogin(profile);
-        triggerToast("Welcome Back! 🎉", `Successfully established credentials for ${profile.name}!`);
-      } else {
-        // Authenticated but profile is missing. Direct them to the fallback onboarding container.
-        setPendingUser({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email || "",
-          name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "HBD Companion"
-        });
-        
-        setFallbackName(firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "");
-        setFallbackUsername((firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "")
-          .toLowerCase()
-          .replace(/[^a-zA-Z0-9]/g, "_")
-          .substring(0, 15));
-        setFallbackBirthday("1997-06-25");
-        setFallbackPhone("");
-        setFallbackCountryCode("GH");
-        
-        setShowProfileSetupFallback(true);
-        triggerToast("Finalize Account ⚙️", "Please complete your HBD profile parameters to get started.");
+      const result = await signInWithGoogle(auth);
+      if (!result) {
+        triggerToast("Redirecting to Google...", "Completing sign-in in this app window.");
+        return;
       }
+      await syncGoogleProfile(result.user);
     } catch (error: any) {
       console.error("Google Auth Setup Error: ", error);
       let errorMsg = "Could not synchronize Google credentials. Please try again.";
@@ -329,11 +366,8 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           name: user.email?.split("@")[0] || "HBD Member"
         });
         setFallbackName(user.email?.split("@")[0] || "");
-        setFallbackUsername((user.email?.split("@")[0] || "")
-          .toLowerCase()
-          .replace(/[^a-zA-Z0-9]/g, "_")
-          .substring(0, 15));
-        setFallbackBirthday("1997-06-25");
+        setFallbackUsername("");
+        setFallbackBirthday("");
         setFallbackPhone("");
         setFallbackCountryCode("GH");
         
@@ -434,28 +468,13 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
       
       let formattedPhone = "";
       const selectedCountry = COUNTRIES.find(c => c.code === fallbackCountryCode) || COUNTRIES[0];
-      if (fallbackPhone.trim().length > 0) {
-        const cleanPhoneDigits = fallbackPhone.replace(/\D/g, '').replace(/^0+/, '');
-        if (cleanPhoneDigits.length < 7) {
-          setFallbackPhoneError("Phone number must contain at least 7 digits.");
-          setFallbackSubmitting(false);
-          return;
-        }
-        
-        formattedPhone = `${selectedCountry.dialCode}${cleanPhoneDigits}`;
-        const phoneQuery1 = query(collection(db, "users"), where("phone", "==", formattedPhone));
-        const phoneQuery2 = query(collection(db, "users"), where("phoneNumber", "==", formattedPhone));
-        const [snap1, snap2] = await withTimeout(Promise.all([
-          getDocs(phoneQuery1),
-          getDocs(phoneQuery2)
-        ]), 3000);
-        
-        if (!snap1.empty || !snap2.empty) {
-          setFallbackPhoneError("This phone number is already registered.");
-          setFallbackSubmitting(false);
-          return;
-        }
+      const cleanPhoneDigits = fallbackPhone.replace(/\D/g, '').replace(/^0+/, '');
+      if (cleanPhoneDigits.length < 7) {
+        setFallbackPhoneError("Phone number must contain at least 7 digits.");
+        setFallbackSubmitting(false);
+        return;
       }
+      formattedPhone = `${selectedCountry.dialCode}${cleanPhoneDigits}`;
       
       const profile: LoginSession = {
         uid: pendingUser.uid,
@@ -465,8 +484,8 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
         birthday: fallbackBirthday,
         avatar: "bg-indigo-500",
         interests: ["Photography", "Modern Design", "Tech & AI"],
-        phone: formattedPhone || undefined,
-        whatsapp: formattedPhone || undefined,
+        phone: formattedPhone,
+        whatsapp: formattedPhone,
       };
       
       await setDoc(doc(db, "users", pendingUser.uid), {
@@ -584,7 +603,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
 
               {/* Phone with dial code */}
               <div>
-                <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-600 mb-1">Mobile Details (Optional)</label>
+                <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-600 mb-1">Mobile Details</label>
                 <div className="flex gap-1.5">
                   <select
                     value={fallbackCountryCode}
@@ -601,6 +620,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                     <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                       type="tel"
+                      required
                       value={fallbackPhone}
                       onChange={(e) => {
                         setFallbackPhone(e.target.value.replace(/\D/g, ""));
@@ -620,7 +640,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
               <button
                 type="submit"
                 disabled={fallbackSubmitting}
-                className="w-full h-11 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-350 text-white text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md"
+                className="w-full h-11 bg-gradient-to-r from-[#FF4D00] to-[#7C3AED] hover:brightness-110 disabled:brightness-75 text-white text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md"
               >
                 {fallbackSubmitting ? (
                   <>
@@ -668,7 +688,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 300, damping: 20 }}
-            className="p-1 bg-white border border-[#E5E1D8] rounded-[2rem] shadow-sm cursor-default flex items-center justify-center"
+            className="p-1 bg-white rounded-full border border-slate-200 shadow-lg cursor-default flex items-center justify-center"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" className="w-14 h-14 block" fill="none">
               <rect x="12" y="15" width="14" height="70" rx="7" fill="url(#hbdLandingLogoMain)" />
@@ -684,8 +704,8 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           </motion.div>
 
           <div className="space-y-1">
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight font-sans">
-              HBD<span className="text-[#FF4D00]">LOOP</span>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight font-sans drop-shadow-[0_1px_0_rgba(255,255,255,0.9)]">
+              HBD<span className="text-slate-900">LOOP</span>
             </h1>
             {/* Dynamic Typing animated effect */}
             <TypingEffect />
@@ -714,7 +734,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                 <button
                   type="button"
                   onClick={() => setSubState("signin_step1")}
-                  className="w-full h-13 min-h-[48px] bg-slate-900 hover:bg-slate-850 text-[#FDFBF7] font-black text-sm rounded-[1.8rem] flex items-center justify-center transition-all duration-200 active:scale-95 cursor-pointer shadow-md select-none border border-slate-900"
+                  className="w-full h-13 min-h-[48px] bg-gradient-to-r from-[#FF4D00] to-[#7C3AED] hover:brightness-110 disabled:brightness-75 text-white font-black text-sm rounded-[1.8rem] flex items-center justify-center transition-all duration-200 active:scale-95 cursor-pointer shadow-md select-none border border-transparent"
                 >
                   Sign In
                 </button>
@@ -809,7 +829,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                 <button
                   type="submit"
                   disabled={isLoading || !emailOrUsername.trim()}
-                  className="w-full h-12 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-300 text-[#FDFBF7] text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                  className="w-full h-12 bg-gradient-to-r from-[#FF4D00] to-[#7C3AED] hover:brightness-110 disabled:brightness-75 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
                 >
                   {isLoading ? (
                     <>
@@ -925,7 +945,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                 <button
                   type="submit"
                   disabled={submittingPassword || !password.trim()}
-                  className="w-full h-12 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-300 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                  className="w-full h-12 bg-gradient-to-r from-[#FF4D00] to-[#7C3AED] hover:brightness-110 disabled:brightness-75 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
                 >
                   {submittingPassword ? (
                     <>

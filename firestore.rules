@@ -1,93 +1,121 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Global Safety Net: default catch-all deny
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Common Identity and Attribute helpers
     function isSignedIn() {
       return request.auth != null;
     }
-    
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
-    
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+
+    function canCreatePendingFriendRequest() {
+      return isSignedIn()
+        && request.resource.data.requestType == "friend_request"
+        && request.resource.data.id == request.auth.uid
+        && request.resource.data.incomingRequest == true
+        && request.resource.data.connectedBack == false;
     }
 
-    function incoming() {
-      return request.resource.data;
+    function canUpdateParticipantConnection() {
+      return isSignedIn()
+        && resource.data.requestType == "friend_request"
+        && resource.data.id == request.auth.uid
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.connectedBack == true;
     }
 
-    function existing() {
-      return resource.data;
+    function optionalString(data, key) {
+      return !(key in data) || data[key] is string;
     }
 
-    // Standalone Validation Blueprints (Anti-Update-Gap Patterns)
-    function isValidUser(data) {
-      return data.uid is string && data.uid.size() <= 128 &&
-             data.name is string && data.name.size() <= 100 &&
-             data.username is string && data.username.size() <= 100 &&
-             data.email is string && data.email.size() <= 100 &&
-             data.birthday is string && data.birthday.size() <= 20;
+    function validUserCreate(data) {
+      return data.uid is string
+        && data.username is string
+        && data.email is string
+        && data.name is string
+        && optionalString(data, "phone")
+        && optionalString(data, "whatsapp")
+        && optionalString(data, "birthday")
+        && optionalString(data, "avatar");
     }
 
-    function isValidFriend(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.name is string && data.name.size() <= 100 &&
-             data.birthday is string && data.birthday.size() <= 20;
+    function validUserUpdate(data) {
+      return (!('uid' in data) || data.uid is string)
+        && optionalString(data, "username")
+        && optionalString(data, "email")
+        && optionalString(data, "name")
+        && optionalString(data, "phone")
+        && optionalString(data, "whatsapp")
+        && optionalString(data, "birthday")
+        && optionalString(data, "avatar");
     }
 
-    function isValidSentGift(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.friendId is string && data.friendId.size() <= 128 &&
-             data.giftName is string && data.giftName.size() <= 200;
+    function validNotificationCreate(data) {
+      return data.senderUid is string
+        && data.recipientUid is string
+        && data.type is string
+        && data.title is string
+        && data.message is string
+        && data.timestamp is string
+        && data.isRead is bool;
     }
 
-    function isValidNotification(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.type is string && data.type.size() <= 50 &&
-             data.title is string && data.title.size() <= 200 &&
-             data.message is string && data.message.size() <= 500;
-    }
-
-    // Core Matching Collections
-    
-    // Users Profile Collection
     match /users/{userId} {
-      // Allow read/write ONLY if the user is authenticated and the document ID matches their 'uid'
-      allow read, write: if isOwner(userId);
-      
-      // Friends & buddies added by this user (Private to owner)
+      allow get: if isOwner(userId) || isSignedIn();
+      allow list: if isSignedIn()
+        && request.query.limit is int
+        && request.query.limit <= 100;
+      allow create: if isOwner(userId)
+        && validUserCreate(request.resource.data);
+      allow update: if isOwner(userId)
+        && (!('uid' in request.resource.data) || request.resource.data.uid == userId)
+        && validUserUpdate(request.resource.data);
+      allow delete: if isOwner(userId);
+
       match /friends/{friendId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId)
+          || (isSignedIn() && resource.data.id == request.auth.uid);
+        allow create: if isOwner(userId) || canCreatePendingFriendRequest();
+        allow update: if isOwner(userId) || canUpdateParticipantConnection();
+        allow delete: if isOwner(userId)
+          || (isSignedIn() && resource.data.id == request.auth.uid);
       }
-      
-      // Historical sent gifts records (Private to owner)
+
       match /sent_gifts/{giftId} {
         allow read, write: if isOwner(userId);
       }
-      
-      // Historical received gifts logs (Private to owner)
+
       match /received_gifts/{giftId} {
         allow read, write: if isOwner(userId);
       }
-      
-      // In-app notifications & alerts (Private to owner)
+
       match /notifications/{notifId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId)
+          || (isSignedIn() && resource.data.senderUid == request.auth.uid);
+        allow create: if isOwner(userId)
+          || (isSignedIn()
+            && request.resource.data.recipientUid == userId
+            && request.resource.data.senderUid == request.auth.uid
+            && validNotificationCreate(request.resource.data));
+        allow update, delete: if isOwner(userId);
       }
     }
 
-    // Usernames collection mapping unique username strings to user profiles (and emails/uids)
     match /usernames/{username} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == username;
+      allow update: if isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == username;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
