@@ -7,7 +7,7 @@ import { MOCK_EXTERNAL_PROFILES, MockProfile } from "./mockProfiles";
 import { QrScanner } from "./components/QrScanner";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signOut, sendPasswordResetEmail } from "firebase/auth";
-import { collection, doc, setDoc, deleteDoc, getDoc, onSnapshot, query, limit as firestoreLimit } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, getDoc, onSnapshot, query, limit as firestoreLimit, where, getDocs, serverTimestamp } from "firebase/firestore";
 import { 
   Gift, 
   Calendar, 
@@ -65,6 +65,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { LoginPage } from "./components/LoginPage";
 import { BirthdayDashboard } from "./components/BirthdayDashboard";
 import { SignUpFlow } from "./components/SignUpFlow";
+import { MandatoryOnboarding } from "./components/MandatoryOnboarding";
 import { ChatPage } from "./components/ChatPage";
 import { ConfettiBurst } from "./components/ConfettiBurst";
 
@@ -173,6 +174,40 @@ export default function App() {
 
   // Dynamic search input inside the Dashboard Executive Deck to discover others
   const [dashboardSearchQuery, setDashboardSearchQuery] = useState<string>("");
+  const [firestoreSearchResults, setFirestoreSearchResults] = useState<any[]>([]);
+  const [isSearchingFirestore, setIsSearchingFirestore] = useState<boolean>(false);
+
+  useEffect(() => {
+    const searchVal = dashboardSearchQuery.trim().toLowerCase();
+    if (searchVal.length < 1) {
+      setFirestoreSearchResults([]);
+      return;
+    }
+
+    setIsSearchingFirestore(true);
+    const q = query(
+      collection(db, "users"),
+      where("username", ">=", searchVal),
+      where("username", "<=", searchVal + "\uf8ff")
+    );
+
+    const timer = setTimeout(async () => {
+      try {
+        const querySnapshot = await getDocs(q);
+        const results: any[] = [];
+        querySnapshot.forEach((doc) => {
+          results.push({ id: doc.id, ...doc.data() });
+        });
+        setFirestoreSearchResults(results);
+      } catch (err) {
+        console.error("Firestore username search query failed: ", err);
+      } finally {
+        setIsSearchingFirestore(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [dashboardSearchQuery]);
 
   // Friends list loaded from local storage or defaults
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -933,6 +968,7 @@ export default function App() {
   const [profileSubTab, setProfileSubTab] = useState<"settings" | "profile" | "wishlist" | "widgets" | "trophies">("settings");
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = useState<boolean>(false);
   const [isPasswordResetLoading, setIsPasswordResetLoading] = useState<boolean>(false);
+  const [passwordResetSuccess, setPasswordResetSuccess] = useState<boolean>(false);
 
   const handlePasswordReset = async () => {
     if (!auth.currentUser) {
@@ -947,9 +983,11 @@ export default function App() {
     }
 
     setIsPasswordResetLoading(true);
+    setPasswordResetSuccess(false);
     try {
       await sendPasswordResetEmail(auth, userEmail);
-      triggerToast("Check your email", `We sent a password reset link to ${userEmail}.`);
+      setPasswordResetSuccess(true);
+      triggerToast("Check your inbox", "We sent a password reset link to your email.");
     } catch (error: any) {
       console.error("Password reset error:", error);
       triggerToast("Reset Failed ❌", error.message || "We could not send the password reset email.");
@@ -1247,8 +1285,8 @@ export default function App() {
       setSignInName(userSession.name || "");
       setSignInUsername(userSession.username || "");
       setSignInEmail(userSession.email || "");
-      setSignInPhone((userSession as any).phone || "+233241234567");
-      setSignInWhatsApp((userSession as any).whatsapp || "+233241234567");
+      setSignInPhone((userSession as any).phone || "");
+      setSignInWhatsApp((userSession as any).whatsapp || "");
       setSignInBirthday(userSession.birthday || "");
       setSignInAvatar(userSession.avatar || "bg-indigo-500");
       setSignInInterests(userSession.interests || []);
@@ -1386,25 +1424,34 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         try {
-          const userDocSnap = await withTimeout(getDoc(doc(db, "users", firebaseUser.uid)));
+          const userRef = doc(db, "users", firebaseUser.uid);
+          let userDocSnap = await withTimeout(getDoc(userRef));
+          
+          if (!userDocSnap.exists()) {
+            // Document missing — create it with safe defaults from Auth
+            await withTimeout(setDoc(userRef, {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || "",
+              name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "",
+              avatar: "", // empty, user will set this
+              birthday: "", // empty, user will be prompted to set this
+              phone: "", // empty, user will be prompted to set this
+              username: "", // empty, user will be prompted to set this
+              interests: [],
+              createdAt: serverTimestamp(),
+              isProfileComplete: false, // flag so app knows to prompt for missing info
+            }, { merge: true }));
+            
+            // Re-fetch document after inserting to ensure local copy is populated
+            userDocSnap = await withTimeout(getDoc(userRef));
+          }
+
           if (userDocSnap.exists()) {
             const data = userDocSnap.data();
             setUserSession(data as any);
             if (data.walletBalance !== undefined) {
               setWalletBalance(data.walletBalance);
             }
-          } else {
-            // Check if registration is active in SignUpFlow
-            const signUpInProgress = localStorage.getItem("signup_in_progress") === "true";
-            if (signUpInProgress) {
-              console.log("onAuthStateChanged: Signup/onboarding in progress. Ignoring automatic fallback session setter to let registration finish.");
-              setAuthLoading(false);
-              return;
-            }
-
-            localStorage.removeItem("birthday_authenticated_user");
-            setAuthLoading(false);
-            return;
           }
         } catch (error: any) {
           console.log("Firebase auth profile loader (handled gracefully offline):", error?.message || error);
@@ -2564,8 +2611,29 @@ export default function App() {
     );
   }
 
+  // Mandatory gating onboarding process collects and validates a unique username, DOB, and phone number
+  const isOnboardingIncomplete = userSession && (
+    !userSession.username || 
+    !userSession.birthday || 
+    !(userSession as any).phone
+  );
+
+  if (isOnboardingIncomplete) {
+    return (
+      <MandatoryOnboarding
+        userSession={userSession as any}
+        onComplete={(updatedSession) => {
+          localStorage.setItem("birthday_authenticated_user", JSON.stringify(updatedSession));
+          setUserSession(updatedSession);
+          setActiveSection("dashboard");
+        }}
+        triggerToast={triggerToast}
+      />
+    );
+  }
+
   return (
-    <div className="w-full min-h-screen bg-[#F1F5F9] flex flex-col lg:flex-row font-sans text-slate-800" id="hbd-app-root">
+    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col lg:flex-row font-sans text-slate-800" id="hbd-app-root">
       
       {/* Toast Alert Prompt Overlay */}
       <AnimatePresence>
@@ -2611,7 +2679,7 @@ export default function App() {
                     </defs>
                   </svg>
                   <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1, textAlign: "left" }}>
-                    <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "22px", fontWeight: 900, letterSpacing: "2px", color: "#FAF8F4" }}>HBD<span style={{ color: "#FF4D00" }}>LOOP</span></span>
+                    <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "22px", fontWeight: 900, letterSpacing: "2px", color: "#0F172A" }}>HBD<span style={{ color: "#FF4D00" }}>LOOP</span></span>
                     <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "8px", fontWeight: 700, letterSpacing: "1px", color: "#6B7280", textTransform: "uppercase", marginTop: "1px" }}>Automated Gifting Engine</span>
                   </div>
                 </div>
@@ -3510,6 +3578,98 @@ export default function App() {
                       exit={{ opacity: 0, height: 0 }}
                       className="space-y-3 pt-1"
                     >
+                      {/* Real-time Registered Matches section */}
+                      <div className="space-y-2 pb-2">
+                        <div className="text-[10px] uppercase font-bold text-[#FF4D00] tracking-wider flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 bg-[#FF4D00] rounded-full animate-ping" />
+                          Real-Time Cloud Profiles Found ({firestoreSearchResults.length})
+                          {isSearchingFirestore && (
+                            <span className="text-[9px] text-slate-400 capitalize animate-pulse font-normal">(Searching...)</span>
+                          )}
+                        </div>
+                        {firestoreSearchResults.length === 0 ? (
+                          <div className="text-[10px] text-slate-400 font-sans italic pl-1">
+                            {isSearchingFirestore ? "Searching the secure user directory..." : "No active real-time username matches found in cloud database."}
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-b border-dashed border-slate-100 pb-3">
+                            {firestoreSearchResults.map((usr) => {
+                              // Calculate upcoming birthday remaining days
+                              const bday = usr.birthday || "2000-01-01";
+                              const calculateUpcomingDays = (bstr: string) => {
+                                try {
+                                  const today = new Date();
+                                  today.setHours(0,0,0,0);
+                                  const bd = new Date(bstr);
+                                  let next = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
+                                  if (next < today) next.setFullYear(today.getFullYear() + 1);
+                                  return Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                                } catch (_) {
+                                  return 365;
+                                }
+                              };
+                              const daysLeft = calculateUpcomingDays(bday);
+
+                              return (
+                                <div
+                                  key={`db-user-${usr.uid}`}
+                                  className="bg-orange-50/25 p-3 rounded-2xl border border-orange-100/70 hover:border-[#FF4D00]/50 hover:shadow-2xs transition-all text-left flex items-start justify-between gap-3 relative"
+                                >
+                                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                                    <div className={`w-9 h-9 rounded-xl ${usr.avatar || "bg-[#FF4D00]"} text-white font-serif font-black flex items-center justify-center shrink-0`}>
+                                      {(usr.name || usr.username || "U").split(" ").map((n:any)=>n[0]).slice(0,2).join("").toUpperCase()}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <h5 className="font-extrabold text-xs text-slate-900 leading-tight truncate">{usr.name || usr.username}</h5>
+                                      <span className="text-[10px] text-[#FF4D00] font-black block">@{usr.username}</span>
+                                      <span className="text-[9px] text-slate-400 font-semibold block mt-0.5">
+                                        {usr.birthday ? `${daysLeft} days until birthday` : "No birthday saved yet"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      // Add user to local circle or view
+                                      const newFriend: Friend = {
+                                        id: usr.uid,
+                                        name: usr.name || usr.username,
+                                        birthday: usr.birthday || "2000-01-01",
+                                        avatar: usr.avatar || "bg-indigo-600",
+                                        relationship: "Mutual Loop Buddy",
+                                        wishlist: usr.wishlist || [],
+                                        interests: usr.interests || [],
+                                        phone: usr.phone || usr.phoneNumber || "",
+                                        whatsapp: usr.whatsapp || usr.phoneNumber || "",
+                                        snapchat: usr.username,
+                                        achievements: [],
+                                        age: "25",
+                                        connectedBack: true
+                                      };
+                                      
+                                      setFriends((prev) => {
+                                        if (prev.some(f => f.id === usr.uid)) return prev;
+                                        const updated = [...prev, newFriend];
+                                        localStorage.setItem("birthday_countdown_friends", JSON.stringify(updated));
+                                        return updated;
+                                      });
+
+                                      setSelectedFriendId(usr.uid);
+                                      setActiveSection("registry");
+                                      setDashboardSearchQuery("");
+                                      window.scrollTo({ top: 0, behavior: "smooth" });
+                                      triggerToast("Buddy Added 🤝", `Added ${usr.name || usr.username} to your circle workspace!`);
+                                    }}
+                                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[9px] px-2.5 py-1.5 rounded-xl cursor-pointer shrink-0"
+                                  >
+                                    View Loop
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
                       <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
                         Immediate Simulation Matches ({getSearchableProfiles().filter(p => p.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.username.toLowerCase().includes(dashboardSearchQuery.toLowerCase()) || p.interests.some((i:string) => i.toLowerCase().includes(dashboardSearchQuery.toLowerCase()))).length + friends.filter(f => f.id !== "alex" && f.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase())).length} accounts)
                       </div>
@@ -7123,30 +7283,46 @@ export default function App() {
                     {/* Password Recovery Zone (Requires active authentication) */}
                     <div className="bg-slate-50 border border-slate-250 rounded-3xl p-4 md:p-5 space-y-3 text-left">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-black uppercase tracking-wider text-slate-700">Password</span>
+                        <span className="text-xs font-black uppercase tracking-wider text-slate-700">
+                          {auth.currentUser?.providerData?.some(p => p.providerId === "google.com") 
+                            ? "Set Up Login Password" 
+                            : "Password Security"}
+                        </span>
                         <div className="h-2 w-2 rounded-full bg-indigo-500 animate-pulse" />
                       </div>
                       <p className="text-[11px] text-slate-500">
-                        Send a secure password reset link to the email attached to this account. Google-linked accounts can use this to add a password.
+                        {auth.currentUser?.providerData?.some(p => p.providerId === "google.com")
+                          ? "This account is authenticated via Google. You can secure a fallback password for direct credentials login."
+                          : "Send a secure password reset link to the email attached to this account. Google-linked accounts can use this to add a password."}
                       </p>
 
-                      <div className="flex justify-end pt-1">
-                        <button
-                          type="button"
-                          onClick={handlePasswordReset}
-                          disabled={isPasswordResetLoading || !userSession?.email}
-                          className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white text-[11px] font-extrabold px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-2"
-                        >
-                          {isPasswordResetLoading ? (
-                            <>
-                              <div className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                              <span>Sending...</span>
-                            </>
-                          ) : (
-                            "Set / Reset Password"
-                          )}
-                        </button>
-                      </div>
+                      {passwordResetSuccess && (
+                        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-xs p-3 rounded-2xl">
+                          We've sent a secure setup link straight to your email inbox!
+                        </div>
+                      )}
+
+                      {!passwordResetSuccess && (
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={handlePasswordReset}
+                            disabled={isPasswordResetLoading || !userSession?.email}
+                            className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white text-[11px] font-extrabold px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-2 animate-bounce-short"
+                          >
+                            {isPasswordResetLoading ? (
+                              <>
+                                <div className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                                <span>Sending...</span>
+                              </>
+                            ) : (
+                              auth.currentUser?.providerData?.some(p => p.providerId === "google.com")
+                                ? "Set Up an Account Password"
+                                : "Set / Reset Password"
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="border-t border-slate-200 pt-4 space-y-3">

@@ -1,12 +1,50 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Global default-deny catch-all safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global reusable primitives
     function isSignedIn() {
       return request.auth != null;
     }
 
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function optionalString(data, key, maxSize) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxSize);
+    }
+
+    // Entity validation blueprints
+    function validUserCreate(data) {
+      return data.uid == request.auth.uid
+        && data.username is string && data.username.size() >= 3 && data.username.size() <= 32
+        && data.email is string && data.email.size() <= 128
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 128
+        && optionalString(data, "phone", 32)
+        && optionalString(data, "whatsapp", 32)
+        && optionalString(data, "birthday", 32)
+        && optionalString(data, "avatar", 128);
+    }
+
+    function validUserUpdate(data) {
+      return (!('uid' in data) || data.uid == request.auth.uid)
+        && optionalString(data, "username", 32)
+        && optionalString(data, "email", 128)
+        && optionalString(data, "name", 128)
+        && optionalString(data, "phone", 32)
+        && optionalString(data, "whatsapp", 32)
+        && optionalString(data, "birthday", 32)
+        && optionalString(data, "avatar", 128);
     }
 
     function canCreatePendingFriendRequest() {
@@ -25,97 +63,74 @@ service cloud.firestore {
         && request.resource.data.connectedBack == true;
     }
 
-    function optionalString(data, key) {
-      return !(key in data) || data[key] is string;
-    }
-
-    function validUserCreate(data) {
-      return data.uid is string
-        && data.username is string
-        && data.email is string
-        && data.name is string
-        && optionalString(data, "phone")
-        && optionalString(data, "whatsapp")
-        && optionalString(data, "birthday")
-        && optionalString(data, "avatar");
-    }
-
-    function validUserUpdate(data) {
-      return (!('uid' in data) || data.uid is string)
-        && optionalString(data, "username")
-        && optionalString(data, "email")
-        && optionalString(data, "name")
-        && optionalString(data, "phone")
-        && optionalString(data, "whatsapp")
-        && optionalString(data, "birthday")
-        && optionalString(data, "avatar");
-    }
-
     function validNotificationCreate(data) {
-      return data.senderUid is string
-        && data.recipientUid is string
-        && data.type is string
-        && data.title is string
-        && data.message is string
-        && data.timestamp is string
-        && data.isRead is bool;
+      return data.senderUid == request.auth.uid
+        && data.recipientUid is string && data.recipientUid.size() <= 128
+        && data.type is string && data.type.size() <= 32
+        && data.title is string && data.title.size() <= 128
+        && data.message is string && data.message.size() <= 512
+        && data.timestamp is string && data.timestamp.size() <= 32
+        && data.isRead == false;
     }
 
+    // 1. User Profiles Collection
     match /users/{userId} {
-      allow get: if isOwner(userId) || isSignedIn();
-      allow list: if isSignedIn()
-        && request.query.limit is int
-        && request.query.limit <= 100;
+      // Allow directory queries and milstone dashboard views safely
+      allow read: if isSignedIn();
       allow create: if isOwner(userId)
         && validUserCreate(request.resource.data);
       allow update: if isOwner(userId)
-        && (!('uid' in request.resource.data) || request.resource.data.uid == userId)
         && validUserUpdate(request.resource.data);
       allow delete: if isOwner(userId);
 
+      // 2. Friends Subcollection
       match /friends/{friendId} {
         allow read: if isOwner(userId)
           || (isSignedIn() && resource.data.id == request.auth.uid);
-        allow create: if isOwner(userId) || canCreatePendingFriendRequest();
-        allow update: if isOwner(userId) || canUpdateParticipantConnection();
+        allow create: if (isValidId(friendId) && isOwner(userId))
+          || (friendId == request.auth.uid && canCreatePendingFriendRequest() && exists(/databases/$(database)/documents/users/$(userId)));
+        allow update: if isOwner(userId)
+          || (friendId == request.auth.uid && canUpdateParticipantConnection());
         allow delete: if isOwner(userId)
           || (isSignedIn() && resource.data.id == request.auth.uid);
       }
 
+      // 3. Sent Gifts Subcollection
       match /sent_gifts/{giftId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) && isValidId(giftId) && exists(/databases/$(database)/documents/users/$(userId));
       }
 
+      // 4. Received Gifts Subcollection
       match /received_gifts/{giftId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) && isValidId(giftId) && exists(/databases/$(database)/documents/users/$(userId));
       }
 
+      // 5. Notifications Subcollection
       match /notifications/{notifId} {
         allow read: if isOwner(userId)
           || (isSignedIn() && resource.data.senderUid == request.auth.uid);
-        allow create: if isOwner(userId)
-          || (isSignedIn()
+        allow create: if (isValidId(notifId) && isOwner(userId))
+          || (isValidId(notifId) && isSignedIn()
             && request.resource.data.recipientUid == userId
             && request.resource.data.senderUid == request.auth.uid
-            && validNotificationCreate(request.resource.data));
+            && validNotificationCreate(request.resource.data)
+            && exists(/databases/$(database)/documents/users/$(userId)));
         allow update, delete: if isOwner(userId);
       }
     }
 
+    // 6. Lowercase Usernames lookup mapping (Reservation Index)
     match /usernames/{username} {
       allow read: if true;
       allow create: if isSignedIn()
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.username == username;
+        && request.resource.data.email is string
+        && username is string && username.size() >= 3 && username.size() <= 32;
       allow update: if isSignedIn()
         && resource.data.uid == request.auth.uid
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.username == username;
+         && request.resource.data.email is string;
       allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
-    }
-
-    match /{document=**} {
-      allow read, write: if false;
     }
   }
 }

@@ -19,6 +19,7 @@ interface LoginSession {
   interests: string[];
   phone?: string;
   whatsapp?: string;
+  isProfileComplete?: boolean;
 }
 
 interface LoginPageProps {
@@ -56,10 +57,10 @@ export function TypingEffect() {
   }, [subIndex, index, reverse]);
 
   return (
-    <div className="h-6 flex items-center justify-center font-mono">
-      <span className="text-xs font-black text-slate-900 tracking-wider uppercase">
+    <div className="h-6 flex items-center justify-center font-mono select-none">
+      <span className="text-xs font-black text-slate-600 tracking-wider uppercase">
         {words[index].substring(0, subIndex)}
-        <span className="animate-pulse ml-0.5 font-bold text-slate-900">|</span>
+        <span className="animate-pulse ml-0.5 font-bold text-[#FF4D00]">|</span>
       </span>
     </div>
   );
@@ -136,16 +137,45 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
   };
 
   const syncGoogleProfile = async (firebaseUser: FirebaseUser) => {
-    const userDocRef = doc(db, "users", firebaseUser.uid);
-    const userDocSnap = await getDoc(userDocRef);
+    try {
+      const userDocRef = doc(db, "users", firebaseUser.uid);
+      let userDocSnap = await getDoc(userDocRef);
 
-    if (userDocSnap.exists()) {
-      const profile = userDocSnap.data() as LoginSession;
-      loginWithProfile(profile, "Welcome Back! 🎉", `Successfully established credentials for ${profile.name}!`);
-      return;
+      if (!userDocSnap.exists()) {
+        // Document missing — create it with safe defaults from Auth
+        await setDoc(userDocRef, {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || "",
+          name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "",
+          avatar: "", // empty, user will set this
+          birthday: "", // empty, user will be prompted to set this
+          phone: "", // empty, user will be prompted to set this
+          username: "", // empty, user will be prompted to set this
+          interests: [],
+          createdAt: new Date(),
+          isProfileComplete: false, // flag so app knows to prompt for missing info
+        }, { merge: true });
+
+        userDocSnap = await getDoc(userDocRef);
+      }
+
+      if (userDocSnap.exists()) {
+        const profile = userDocSnap.data() as LoginSession;
+        // After this “get or create,” check whether required fields like birthday, phone, username are empty or isProfileComplete is false
+        const isProfileIncomplete = !profile.username || !profile.birthday || !profile.phone || profile.isProfileComplete === false;
+
+        if (!isProfileIncomplete) {
+          loginWithProfile(profile, "Welcome Back! 🎉", `Successfully established credentials for ${profile.name}!`);
+        } else {
+          showProfileFallback(firebaseUser);
+        }
+      } else {
+        showProfileFallback(firebaseUser);
+      }
+    } catch (err: any) {
+      console.warn("Google credentials initialization fallback active:", err);
+      showProfileFallback(firebaseUser);
     }
-
-    showProfileFallback(firebaseUser);
   };
 
   useEffect(() => {
@@ -217,7 +247,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
     }
   };
 
-  // STEP 1 — Verify if identifier match exists inside Firestore database
+  // STEP 1 — Set identifier email to proceed to Auth
   const handleVerifyIdentifier = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setValidationError(null);
@@ -226,97 +256,55 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
     const identifier = emailOrUsername.trim();
     if (!identifier) {
       setValidationError("Please enter your email, username, or phone number first.");
-      triggerToast("Blank Credentials ⚠️", "Provide a registered account reference.");
+      triggerToast("Blank Credentials ⚠️", "Provide a registered identifier.");
       return;
     }
 
     setIsLoading(true);
 
     try {
-      let resolvedEmail = "";
-      let found = false;
-
-      // Classify the identifier
       const isEmail = identifier.includes("@");
-
       if (isEmail) {
-        // A. Direct matching document lookups
-        const emailQuery = query(collection(db, "users"), where("email", "==", identifier.toLowerCase()));
-        const snap = await withTimeout(getDocs(emailQuery), 3500);
-        if (!snap.empty) {
-          resolvedEmail = snap.docs[0].data().email;
-          found = true;
-        }
-      } else {
-        // B. Handle username handles
-        const cleanUsername = identifier.toLowerCase().replace(/^@/, "").trim();
-        const usernameDocRef = doc(db, "usernames", cleanUsername);
-        const usernameDocSnap = await withTimeout(getDoc(usernameDocRef), 3000);
-
-        if (usernameDocSnap.exists()) {
-          resolvedEmail = usernameDocSnap.data().email;
-          found = true;
-        } else {
-          // Dynamic query on users usernames subfield as fallback
-          const usernameQuery = query(collection(db, "users"), where("username", "==", cleanUsername));
-          const querySnapshot = await withTimeout(getDocs(usernameQuery), 3000);
-          if (!querySnapshot.empty) {
-            resolvedEmail = querySnapshot.docs[0].data().email;
-            found = true;
-          }
-        }
-
-        // C. Phone number matches (Check only if not found via username)
-        if (!found) {
-          const cleanPhoneDigits = identifier.replace(/\D/g, "");
-          if (cleanPhoneDigits.length >= 7) {
-            // Check formatted variations in firestore
-            const phoneQuery1 = query(collection(db, "users"), where("phone", "==", identifier));
-            const phoneQuery2 = query(collection(db, "users"), where("phoneNumber", "==", identifier));
-            const [pSnap1, pSnap2] = await withTimeout(Promise.all([
-              getDocs(phoneQuery1),
-              getDocs(phoneQuery2)
-            ]), 3500);
-
-            if (!pSnap1.empty) {
-              resolvedEmail = pSnap1.docs[0].data().email;
-              found = true;
-            } else if (!pSnap2.empty) {
-              resolvedEmail = pSnap2.docs[0].data().email;
-              found = true;
-            }
-          }
-        }
-      }
-
-      if (found && resolvedEmail) {
-        setVerifiedEmail(resolvedEmail);
+        // Direct email proceed to protect email harvesting
+        setVerifiedEmail(identifier.toLowerCase());
         setSubState("signin_step2");
-        triggerToast("Match Found! 🔑", "Slide to confirm password credentials.");
+        triggerToast("Email Verified 🔑", "Slide to confirm password credentials.");
       } else {
-        setValidationError("This identifier does not match any user record in HBD database.");
-        triggerToast("No Record Found ❌", "We couldn't locate any account for this identifier.");
+        const cleanIdentifier = identifier.toLowerCase().replace(/^@/, "").trim();
+        const isPhone = /^\+?[0-9\s\-()]{7,}$/.test(cleanIdentifier);
+
+        if (isPhone) {
+          // Since unauthenticated lookups fail on /users, we warn nicely and recommend username or email
+          setValidationError("Phone lookups are restricted. Please enter your email or username handle instead.");
+          triggerToast("Query Restrained ⚠️", "Please use email or username to login.");
+        } else {
+          // Username check on /usernames
+          const usernameDocRef = doc(db, "usernames", cleanIdentifier);
+          const usernameDocSnap = await withTimeout(getDoc(usernameDocRef), 3000);
+
+          if (usernameDocSnap.exists()) {
+            const mappedEmail = usernameDocSnap.data()?.email;
+            if (mappedEmail) {
+              setVerifiedEmail(mappedEmail.toLowerCase());
+              setSubState("signin_step2");
+              triggerToast("Username mapped! 🔑", `Welcome back, @${cleanIdentifier}! Please enter your password.`);
+            } else {
+              setValidationError("We couldn't find an account matching that username. Please write your email directly.");
+            }
+          } else {
+            setValidationError("We couldn't find an account matching that information. Want to create a new one?");
+            triggerToast("Account Not Found ❌", "Username handle not tracked.");
+          }
+        }
       }
     } catch (err: any) {
-      console.error("Verification query error: ", err);
-      // Auto fallbacks for offline testing sandbox mode to avoid lockouts
-      const currentProfileStr = localStorage.getItem("birthday_authenticated_user");
-      if (currentProfileStr) {
-        try {
-          const parsed = JSON.parse(currentProfileStr);
-          if (parsed.email?.toLowerCase() === identifier.toLowerCase() || parsed.username?.toLowerCase() === identifier.toLowerCase().replace(/^@/, "")) {
-            setVerifiedEmail(parsed.email);
-            setSubState("signin_step2");
-            triggerToast("Cache Match Loaded ⚡", "Proceeding with sandboxed profile check.");
-            setIsLoading(false);
-            return;
-          }
-        } catch (e) {
-          // ignore
-        }
+      console.warn("Identifier verification exception handled gracefully:", err);
+      let friendly = "We couldn't find an account matching that information. Want to create a new one?";
+      if (err.code === "auth/unauthorized-domain" || err.message?.includes("unauthorized-domain")) {
+        friendly = "Sign-in isn't available on this version of the app yet.";
       }
-      setValidationError("Failed to verify identifier due to database timeout. Please try again.");
-      triggerToast("Request Timeout ⏳", "No responsive gateway channel found.");
+      setValidationError(friendly);
+      triggerToast("Connection error ❌", friendly);
     } finally {
       setIsLoading(false);
     }
@@ -328,7 +316,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
     setValidationError(null);
     setResetNotice(null);
 
-    const cleanPass = password.trim();
+    const cleanPass = password; // Do not trim password to avoid trimming bugs
     if (!cleanPass) {
       setValidationError("Kindly type your password below to proceed.");
       return;
@@ -338,34 +326,24 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
 
     try {
       // 1. Sign In via Auth Credentials first
-      const userCredential = await withTimeout(signInWithEmailAndPassword(auth, verifiedEmail, cleanPass), 4500);
-      const user = userCredential.user;
+      const authResult = await withTimeout(signInWithEmailAndPassword(auth, verifiedEmail, cleanPass), 4500);
 
-      // 2. Perform extreme explicit, clean document query directed at unique account string token ID (REPAIR FIRESTORE RESOLUTION rule)
-      let profile: LoginSession | null = null;
-      try {
-        const userDocRef = doc(db, "users", user.uid);
-        const userDocSnap = await withTimeout(getDoc(userDocRef), 3500);
-        if (userDocSnap.exists()) {
-          profile = userDocSnap.data() as LoginSession;
-        }
-      } catch (dbErr) {
-        console.warn("Direct Firestore retrieval blocked or offline:", dbErr);
-      }
+      // 2. Look up corresponding profile document directly using authenticated UID
+      const userDoc = await getDoc(doc(db, "users", authResult.user.uid));
 
-      // If document is present, map them to workspace dashboard
-      if (profile) {
+      if (userDoc.exists()) {
+        const profile = userDoc.data() as LoginSession;
         localStorage.setItem("birthday_authenticated_user", JSON.stringify(profile));
         onLogin(profile);
         triggerToast("Session Active 🥳", `Good to see you again, ${profile.name}!`);
       } else {
         // Authenticated but profile doc is missing! Set up fallback onboarding profile helper dynamic
         setPendingUser({
-          uid: user.uid,
-          email: user.email || verifiedEmail,
-          name: user.email?.split("@")[0] || "HBD Member"
+          uid: authResult.user.uid,
+          email: authResult.user.email || verifiedEmail,
+          name: authResult.user.email?.split("@")[0] || "HBD Member"
         });
-        setFallbackName(user.email?.split("@")[0] || "");
+        setFallbackName(authResult.user.email?.split("@")[0] || "");
         setFallbackUsername("");
         setFallbackBirthday("");
         setFallbackPhone("");
@@ -376,8 +354,15 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
       }
     } catch (err: any) {
       console.error("Firebase Auth credential mismatch: ", err);
-      // Sandbox fallback mode matching password
-      if (err.message && (err.message.includes("Timeout") || err.code === "auth/network-request-failed" || err.message.includes("network"))) {
+      let friendly = "Oops! That password doesn't match our records. Please try again.";
+      
+      const errMsg = err.message || "";
+      const errCode = err.code || "";
+      
+      if (errCode === "auth/network-request-failed" || errMsg.includes("network") || errMsg.includes("Timeout")) {
+        friendly = "We couldn't find an account matching that information. Want to create a new one?";
+        
+        // Sandbox fallback mode matching password
         const saved = localStorage.getItem("birthday_authenticated_user");
         if (saved) {
           try {
@@ -390,9 +375,14 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
             }
           } catch (_) {}
         }
+      } else if (errCode === "auth/unauthorized-domain" || errMsg.includes("unauthorized-domain")) {
+        friendly = "Sign-in isn't available on this version of the app yet.";
+      } else if (errCode === "permission-denied" || errMsg.includes("permission-denied")) {
+        friendly = "Oops! That password doesn't match our records. Please try again.";
       }
-      setValidationError("Incorrect security code or password identifier. Ensure your credentials match.");
-      triggerToast("Access Denied ❌", "Invalid Credentials.");
+      
+      setValidationError(friendly);
+      triggerToast("Access Denied ❌", friendly);
     } finally {
       setSubmittingPassword(false);
     }
@@ -517,7 +507,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
   // If in Setup fallback, render beautiful custom wizard profiles
   if (showProfileSetupFallback && pendingUser) {
     return (
-      <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-4 relative overflow-hidden text-slate-900" id="hbd-onboarding-fallback-root">
         {/* Colorful backgrounds */}
         <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.06),transparent_55%)] pointer-events-none" />
         <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(124,58,237,0.06),transparent_55%)] pointer-events-none" />
@@ -559,7 +549,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                     value={fallbackName}
                     onChange={(e) => setFallbackName(e.target.value)}
                     placeholder="e.g. Alex Johnson"
-                    className="w-full bg-[#FAF9F6] border border-[#E5E1D8] text-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs outline-none focus:border-indigo-600 focus:bg-white transition-all font-semibold"
+                    className="w-full bg-white text-slate-900 font-medium placeholder-slate-400 border border-[#E5E1D8] focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-9 pr-3 py-3 text-xs transition-all"
                   />
                 </div>
               </div>
@@ -578,7 +568,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                       setFallbackUsernameError("");
                     }}
                     placeholder="username_handle"
-                    className={`w-full bg-[#FAF9F6] border ${fallbackUsernameError ? 'border-rose-500' : 'border-[#E5E1D8]'} text-slate-800 rounded-xl pl-7 pr-3 py-3 text-xs outline-none focus:border-indigo-600 focus:bg-white transition-all font-mono font-bold`}
+                    className={`w-full bg-white text-slate-900 font-medium placeholder-slate-400 border ${fallbackUsernameError ? 'border-rose-500' : 'border-[#E5E1D8]'} focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-7 pr-3 py-3 text-xs transition-all font-mono`}
                   />
                 </div>
                 {fallbackUsernameError && (
@@ -596,7 +586,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                     required
                     value={fallbackBirthday}
                     onChange={(e) => setFallbackBirthday(e.target.value)}
-                    className="w-full bg-[#FAF9F6] border border-[#E5E1D8] text-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs outline-none focus:border-indigo-600 focus:bg-white cursor-pointer transition-all font-semibold"
+                    className="w-full bg-white text-slate-900 font-medium placeholder-slate-400 border border-[#E5E1D8] focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-9 pr-3 py-3 text-xs cursor-pointer transition-all"
                   />
                 </div>
               </div>
@@ -627,7 +617,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                         setFallbackPhoneError("");
                       }}
                       placeholder="e.g. 541234567"
-                      className={`w-full bg-[#FAF9F6] border ${fallbackPhoneError ? 'border-rose-500' : 'border-[#E5E1D8]'} text-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs outline-none focus:border-indigo-600 focus:bg-white transition-all font-mono font-bold`}
+                      className={`w-full bg-white text-slate-900 font-medium placeholder-slate-400 border ${fallbackPhoneError ? 'border-rose-500' : 'border-[#E5E1D8]'} focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-9 pr-3 py-3 text-xs transition-all font-mono`}
                     />
                   </div>
                 </div>
@@ -671,7 +661,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
   }
 
   return (
-    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-between p-6 relative overflow-hidden font-sans">
+    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-between p-6 relative overflow-hidden font-sans text-slate-900" id="hbd-login-page-root">
       {/* Soft overlay elements */}
       <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.06),transparent_55%)] pointer-events-none" />
       <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(124,58,237,0.06),transparent_55%)] pointer-events-none" />
@@ -688,7 +678,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 300, damping: 20 }}
-            className="p-1 bg-white rounded-full border border-slate-200 shadow-lg cursor-default flex items-center justify-center"
+            className="p-2 bg-white rounded-full border-2 border-slate-300 shadow-xl cursor-default flex items-center justify-center ring-4 ring-slate-100/60"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" className="w-14 h-14 block" fill="none">
               <rect x="12" y="15" width="14" height="70" rx="7" fill="url(#hbdLandingLogoMain)" />
@@ -704,8 +694,9 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           </motion.div>
 
           <div className="space-y-1">
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight font-sans drop-shadow-[0_1px_0_rgba(255,255,255,0.9)]">
-              HBD<span className="text-slate-900">LOOP</span>
+            <h1 className="text-3xl font-sans">
+              <span className="text-slate-900 font-black tracking-tight">HBD </span>
+              <span className="text-[#FF4D00] font-black tracking-tight">LOOP</span>
             </h1>
             {/* Dynamic Typing animated effect */}
             <TypingEffect />
@@ -768,28 +759,28 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                 <button
                   type="button"
                   onClick={() => setSubState("landing")}
-                  className="w-9 h-9 rounded-full bg-[#FAF9F6] border border-[#E5E1D8] flex items-center justify-center text-slate-500 hover:text-slate-800 transition-colors"
+                  className="w-9 h-9 rounded-full bg-[#FAF9F6] border border-[#E5E1D8] flex items-center justify-center text-slate-800 hover:text-slate-900 transition-colors"
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
                 <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest font-mono">Step 1 of 2</span>
               </div>
 
-              <div className="text-left space-y-1">
+              <div className="text-left space-y-1 font-sans">
                 <h3 className="font-extrabold text-base text-[#0F172A]">Verify Account</h3>
-                <p className="text-xs text-slate-500 leading-normal">
-                  Provide your registered identifier string to enter.
+                <p className="text-xs text-slate-800 leading-normal font-medium">
+                  Enter your email, phone, or username to get started.
                 </p>
               </div>
 
               {/* Gentle Error Notice Banner with bottom right Create Account link */}
               {validationError && (
-                <div className="bg-rose-50 border border-rose-220 rounded-2xl p-4 text-left relative">
-                  <div className="flex items-center gap-1.5 text-rose-800 font-extrabold text-xs mb-1">
-                    <ShieldAlert className="w-4 h-4" />
-                    <span>Access Interrupted</span>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-left relative">
+                  <div className="flex items-center gap-1.5 text-amber-900 font-extrabold text-xs mb-1">
+                    <ShieldAlert className="w-4 h-4 text-amber-600" />
+                    <span>Quick Security Check</span>
                   </div>
-                  <p className="text-[11px] text-rose-700 leading-relaxed font-semibold pr-1.5">
+                  <p className="text-xs text-amber-900 font-bold leading-relaxed pr-1.5">
                     {validationError}
                   </p>
                   <div className="text-right mt-3">
@@ -806,7 +797,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
 
               <form onSubmit={handleVerifyIdentifier} className="space-y-4 text-left">
                 <div>
-                  <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-600 mb-1.5 px-1">
+                  <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-800 mb-1.5 px-1">
                     Email, Username, or Phone Number
                   </label>
                   <div className="relative">
@@ -821,7 +812,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                         setValidationError(null);
                       }}
                       placeholder="name@example.com or @handle"
-                      className="w-full bg-[#FAF9F6]/80 border border-[#E5E1D8] text-slate-850 rounded-xl pl-10 pr-3 py-3.5 text-xs outline-none focus:border-indigo-600 focus:bg-white transition-all font-semibold"
+                      className="w-full bg-white text-slate-900 font-medium placeholder-slate-400 border border-[#E5E1D8] focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-10 pr-3 py-3.5 text-xs transition-all"
                     />
                   </div>
                 </div>
@@ -866,7 +857,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                     setValidationError(null);
                     setSubState("signin_step1");
                   }}
-                  className="w-9 h-9 rounded-full bg-[#FAF9F6] border border-[#E5E1D8] flex items-center justify-center text-slate-500 hover:text-slate-800 transition-colors"
+                  className="w-9 h-9 rounded-full bg-[#FAF9F6] border border-[#E5E1D8] flex items-center justify-center text-slate-800 hover:text-slate-950 transition-colors"
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
@@ -882,12 +873,12 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
 
               {/* Error Notice Block */}
               {validationError && (
-                <div className="bg-rose-50 border border-rose-220 rounded-2xl p-4 text-left">
-                  <div className="flex items-center gap-1.5 text-rose-800 font-extrabold text-xs mb-1">
-                    <ShieldAlert className="w-4 h-4" />
-                    <span>Mismatched Credentials</span>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-left">
+                  <div className="flex items-center gap-1.5 text-amber-900 font-extrabold text-xs mb-1">
+                    <ShieldAlert className="w-4 h-4 text-amber-600" />
+                    <span>Quick Security Check</span>
                   </div>
-                  <p className="text-[11px] text-rose-700 leading-relaxed font-semibold">
+                  <p className="text-xs text-amber-900 font-bold leading-relaxed">
                     {validationError}
                   </p>
                 </div>
@@ -902,7 +893,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
 
               <form onSubmit={handlePasswordSubmit} className="space-y-4 text-left">
                 <div>
-                  <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-600 mb-1.5 px-1">
+                  <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-800 mb-1.5 px-1">
                     Password Code
                   </label>
                   <div className="relative">
@@ -917,7 +908,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                         setValidationError(null);
                       }}
                       placeholder="Your secret passcode"
-                      className="w-full bg-[#FAF9F6]/80 border border-[#E5E1D8] text-slate-850 rounded-xl pl-10 pr-10 py-3.5 text-xs outline-none focus:border-indigo-600 focus:bg-white transition-all font-semibold"
+                      className="w-full bg-white text-slate-900 font-medium placeholder-slate-400 border border-[#E5E1D8] focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-10 pr-10 py-3.5 text-xs transition-all"
                     />
                     <button
                       type="button"
@@ -1011,7 +1002,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           <span className="font-bold">Continue with Google</span>
         </button>
 
-        <p className="text-[10px] text-slate-600 font-bold tracking-widest uppercase">
+        <p className="text-[10px] text-slate-800 font-extrabold tracking-widest uppercase">
           Track Birthdays · AI Gift Ideas · Secure Wishlists
         </p>
       </div>

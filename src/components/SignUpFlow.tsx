@@ -76,7 +76,7 @@ export const COUNTRIES = [
 ];
 
 export function normalizeUsername(value: string) {
-  return value.trim().toLowerCase().replace(/^@/, "").replace(/\s+/g, "_");
+  return value.trim().toLowerCase().replace(/^@/, "").replace(/\s+/g, "");
 }
 
 const INTEREST_OPTIONS = [
@@ -147,6 +147,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   const [email, setEmail] = useState("");
   
   // Checking uniqueness handles
+  const [usernameStatus, setUsernameStatus] = useState<"IDLE" | "LOADING" | "AVAILABLE" | "UNAVAILABLE" | "ERROR">("IDLE");
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
   const [usernameError, setUsernameError] = useState("");
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
@@ -234,20 +235,28 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
     const targetedUsername = normalizeUsername(username);
     if (targetedUsername.length < 3) {
       setUsernameError("");
+      setUsernameStatus("IDLE");
       return;
     }
 
+    setUsernameStatus("LOADING");
+    setIsCheckingUsername(true);
+
     const timeoutId = setTimeout(async () => {
-      setIsCheckingUsername(true);
-      setUsernameError("");
       try {
         const usernameDocSnap = await withTimeout(getDoc(doc(db, "usernames", targetedUsername)), 2500);
         if (usernameDocSnap.exists()) {
-          setUsernameError("This username handle is already claimed.");
+          setUsernameStatus("UNAVAILABLE");
+          setUsernameError("That username is already taken! Try another one.");
+        } else {
+          setUsernameStatus("AVAILABLE");
+          setUsernameError("");
         }
       } catch (err: any) {
-        console.error("Username availability check error:", err);
-        setUsernameError("Could not verify username uniqueness right now.");
+        console.warn("Username availability lookup exception (graceful recovery active):", err);
+        setUsernameStatus("ERROR");
+        // "Never merge ERROR with UNAVAILABLE." - We keep error state, set message, but allow proceed
+        setUsernameError("Unable to verify availability right now.");
       } finally {
         setIsCheckingUsername(false);
       }
@@ -264,26 +273,30 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       return;
     }
     
+    setUsernameStatus("LOADING");
     setIsCheckingUsername(true);
-    setUsernameError("");
     try {
-      // 1. Check usernames flat collection first
+      // Check usernames collection
       const usernameDocRef = doc(db, "usernames", targetedUsername);
       const usernameDocSnap = await withTimeout(getDoc(usernameDocRef), 2500);
       if (usernameDocSnap.exists()) {
-        setUsernameError("This username handle is already claimed.");
-        triggerToast("Username Taken ❌", "This username handle is already claimed.");
+        setUsernameStatus("UNAVAILABLE");
+        setUsernameError("That username is already taken! Try another one.");
+        triggerToast("Username Taken ❌", "That username is already taken! Try another one.");
         setIsCheckingUsername(false);
         return;
       }
 
+      setUsernameStatus("AVAILABLE");
       setIsCheckingUsername(false);
       go(2);
     } catch (err: any) {
-      console.error("Username query verification error:", err);
-      setUsernameError("Verification failed due to a network or database issue. Please try again.");
-      triggerToast("Query Failed ❌", "Could not verify username uniqueness.");
+      console.warn("Username query exception during submit (graceful recovery active):", err);
+      // Fallback: evaluate 'isAvailable = true' and let them proceed to next step
+      setUsernameStatus("ERROR");
       setIsCheckingUsername(false);
+      setUsernameError(""); // clear error to proceed
+      go(2);
     }
   };
 
@@ -479,6 +492,26 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
         uid = userCredential.user.uid;
         session.uid = uid;
 
+        // Atomic secure sync payload
+        const signupPayload = {
+          uid: userCredential.user.uid,
+          email: email.toLowerCase().trim(),
+          username: username.toLowerCase().replace(/\s+/g, ""),
+          phoneNumber: formattedPhone || phone,
+          name: name.trim() || email.split("@")[0] || "HBD Member",
+          isPremium: false,
+          createdAt: new Date(),
+          birthday: birthday || "",
+          avatar: avatar || "",
+          interests: interests || [],
+          phone: formattedPhone || phone,
+          whatsapp: formattedPhone || phone,
+          isProfileComplete: true
+        };
+
+        // Write immediately to Cloud Firestore under users collection; if this fails, error Bubbles to halt session
+        await withTimeout(setDoc(doc(db, "users", userCredential.user.uid), signupPayload), 4000);
+
         // Instantly call sendEmailVerification
         try {
           await withTimeout(sendEmailVerification(userCredential.user), 4000);
@@ -529,7 +562,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       title: "What's your name?",
       subtitle: "This is how your friends will see you on the registry.",
       content: (
-        <div className="space-y-3">
+        <div className="space-y-3 font-sans">
           <input
             ref={inputRef}
             type="text"
@@ -553,7 +586,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
       title: "Pick a username",
       subtitle: "Your unique handler. Friends will find you with this.",
       content: (
-        <div className="space-y-3 text-left">
+        <div className="space-y-3 text-left font-sans">
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-600 font-extrabold text-lg select-none">@</span>
             <input
@@ -565,14 +598,14 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
                 setUsernameError("");
               }}
               onKeyDown={async (e) => {
-                if (e.key === "Enter" && normalizeUsername(username).length >= 3 && !isCheckingUsername) {
+                if (e.key === "Enter" && normalizeUsername(username).length >= 3 && !isCheckingUsername && usernameStatus !== "UNAVAILABLE") {
                    await handleUsernameNext();
                 }
               }}
               placeholder="username_handle"
-              className={`w-full bg-white border ${usernameError ? 'border-rose-500' : 'border-[#E5E1D8]'} text-[#1E293B] text-lg font-semibold rounded-2xl pl-10 pr-12 py-4 outline-none focus:border-indigo-600 focus:bg-white focus:ring-1 focus:ring-indigo-600 transition-all placeholder:text-slate-450 font-mono`}
+              className={`w-full bg-white border ${usernameError ? 'border-amber-500' : 'border-[#E5E1D8]'} text-[#1E293B] text-lg font-semibold rounded-2xl pl-10 pr-12 py-4 outline-none focus:border-indigo-600 focus:bg-white focus:ring-1 focus:ring-indigo-600 transition-all placeholder:text-slate-450 font-mono`}
             />
-            {normalizeUsername(username).length >= 3 && !isCheckingUsername && !usernameError && (
+            {normalizeUsername(username).length >= 3 && !isCheckingUsername && usernameStatus === "AVAILABLE" && (
               <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
@@ -587,28 +620,39 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
               </div>
             )}
           </div>
-          {usernameError ? (
-            <div className="bg-rose-550 border border-rose-300 rounded-2xl p-4 space-y-3 shadow-md">
-              <div className="flex items-center gap-2 text-white font-extrabold text-xs">
-                <span>⚠️ Handle Claimed</span>
+          {usernameStatus === "UNAVAILABLE" && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+              <div className="flex items-center gap-2 text-amber-900 font-extrabold text-xs">
+                <span>⚠️ Note</span>
               </div>
-              <p className="text-xs text-rose-50 font-semibold leading-relaxed">
-                This identifier is taken.{" "}
+              <p className="text-xs text-amber-900 font-bold leading-relaxed">
+                That username is already taken! Try another one.{" "}
                 <button
                   type="button"
                   onClick={handleGoToLoginClean}
-                  className="underline font-black text-white hover:text-rose-100 transition-colors cursor-pointer"
+                  className="underline font-black text-amber-950 hover:text-amber-700 transition-colors cursor-pointer"
                 >
                   Click here to Sign In instead
                 </button>
               </p>
             </div>
-          ) : (
+          )}
+          {usernameStatus === "ERROR" && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+              <div className="flex items-center gap-2 text-amber-900 font-extrabold text-xs">
+                <span>⚠️ Note</span>
+              </div>
+              <p className="text-xs text-amber-900 font-semibold leading-relaxed">
+                Unable to verify availability right now. You can try to proceed anyway.
+              </p>
+            </div>
+          )}
+          {usernameStatus !== "UNAVAILABLE" && usernameStatus !== "ERROR" && (
             <p className="text-xs text-slate-500 px-1">At least 3 characters. No spaces.</p>
           )}
         </div>
       ),
-      canNext: normalizeUsername(username).length >= 3 && !isCheckingUsername && !usernameError,
+      canNext: normalizeUsername(username).length >= 3 && !isCheckingUsername && usernameStatus !== "UNAVAILABLE",
       onNext: handleUsernameNext,
     },
 
@@ -653,16 +697,16 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
             )}
           </div>
           {emailError ? (
-            <div className="bg-rose-550 border border-rose-300 rounded-2xl p-4 space-y-3 shadow-md">
-              <div className="flex items-center gap-2 text-white font-extrabold text-xs">
-                <span>⚠️ Email Unavailable</span>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+              <div className="flex items-center gap-2 text-amber-900 font-extrabold text-xs">
+                <span>⚠️ Note</span>
               </div>
-              <p className="text-xs text-rose-50 font-semibold leading-relaxed">
-                This identifier is taken.{" "}
+              <p className="text-xs text-amber-900 font-bold leading-relaxed">
+                That username is already taken! Try another one.{" "}
                 <button
                   type="button"
                   onClick={handleGoToLoginClean}
-                  className="underline font-black text-white hover:text-rose-100 transition-colors cursor-pointer"
+                  className="underline font-black text-amber-950 hover:text-amber-705 transition-colors cursor-pointer"
                 >
                   Click here to Sign In instead
                 </button>
@@ -810,16 +854,16 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
               )}
             </div>
             {phoneError ? (
-              <div className="bg-rose-550 border border-rose-300 rounded-2xl p-4 space-y-3 shadow-md">
-                <div className="flex items-center gap-2 text-white font-extrabold text-xs">
-                  <span>⚠️ Phone Linked</span>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                <div className="flex items-center gap-2 text-amber-900 font-extrabold text-xs">
+                  <span>⚠️ Note</span>
                 </div>
-                <p className="text-xs text-rose-50 font-semibold leading-relaxed">
-                  This identifier is taken.{" "}
+                <p className="text-xs text-amber-900 font-bold leading-relaxed">
+                  That username is already taken! Try another one.{" "}
                   <button
                     type="button"
                     onClick={handleGoToLoginClean}
-                    className="underline font-black text-white hover:text-rose-100 transition-colors cursor-pointer"
+                    className="underline font-black text-amber-950 hover:text-amber-705 transition-colors cursor-pointer"
                   >
                     Click here to Sign In instead
                   </button>
@@ -993,8 +1037,8 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
     return (
       <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-5 relative overflow-hidden">
         {/* Soft, warm colorful ambient radial glows */}
-        <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.06),transparent_55%)] pointer-events-none" />
-        <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(124,58,237,0.06),transparent_55%)] pointer-events-none" />
+        <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.15),transparent_60%)] pointer-events-none" />
+        <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(47,121,195,0.15),transparent_60%)] pointer-events-none" />
         
         <div className="w-full max-w-md mx-auto sm:max-w-xl lg:max-w-4xl px-4 z-10 flex flex-col gap-6" id="hbd-verification-flow">
           {/* Logo Mark Inline SVG - Upgraded HBD Loop anchor */}
@@ -1012,13 +1056,13 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
                 </defs>
               </svg>
               <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1, textAlign: "left" }}>
-                <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "28px", fontWeight: 900, letterSpacing: "3px", color: "#1E293B" }}>HBD<span style={{ color: "#FF4D00" }}>LOOP</span></span>
+                <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "28px", fontWeight: 900, letterSpacing: "3px", color: "#0F172A" }}>HBD<span style={{ color: "#FF4D00" }}>LOOP</span></span>
                 <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", fontSize: "9px", fontWeight: 700, letterSpacing: "2px", color: "#64748B", textTransform: "uppercase", marginTop: "2px" }}>Automated Gifting Engine</span>
               </div>
             </div>
           </div>
 
-          {/* Locked Verification View Card */}
+          {/* Let's check it's you */}
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1026,8 +1070,8 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
           >
             <div className="space-y-2">
               <div className="text-4xl">✉️</div>
-              <h2 className="text-xl font-extrabold text-[#0F172A]">Verify Your Email</h2>
-              <p className="text-xs text-slate-500 leading-relaxed">
+              <h2 className="text-xl font-extrabold text-[#0F172A]">Let's check it's you</h2>
+              <p className="text-xs text-slate-550 leading-relaxed">
                 We've sent a secure verification link to <span className="font-bold text-[#1E293B]">{savedSessionTemp.email}</span>. Click the link in that email to proceed.
               </p>
             </div>
@@ -1036,7 +1080,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-3.5 rounded-xl leading-relaxed text-left font-bold"
+                className="bg-amber-50 border border-amber-200 text-amber-900 text-xs p-3.5 rounded-xl leading-relaxed text-left font-bold"
               >
                 ⚠️ {verificationError}
               </motion.div>
@@ -1103,8 +1147,8 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   return (
     <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-5 relative overflow-hidden">
       {/* Soft, warm colorful ambient radial glows */}
-      <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.06),transparent_55%)] pointer-events-none" />
-      <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(124,58,237,0.06),transparent_55%)] pointer-events-none" />
+      <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.15),transparent_60%)] pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(47,121,195,0.15),transparent_60%)] pointer-events-none" />
 
       <div className="w-full max-w-md mx-auto sm:max-w-xl lg:max-w-4xl px-4 z-10 flex flex-col gap-6">
 
