@@ -73,6 +73,7 @@ export interface SentGift {
   dateSent: string;
   revealDate?: string;
   isOpened?: boolean;
+  isSurprise?: boolean;
 }
 
 export interface ReceivedGift {
@@ -86,6 +87,21 @@ export interface ReceivedGift {
   message: string;
   dateReceived: string;
   isOpened?: boolean;
+  isSurprise?: boolean;
+}
+
+export interface WishlistFeedItem {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  actionText: string;
+  title: string;
+  description: string;
+  price: number;
+  raised: number;
+  contributors: string[];
+  totalContributors: number;
 }
 
 

@@ -152,7 +152,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           phone: "", // empty, user will be prompted to set this
           username: "", // empty, user will be prompted to set this
           interests: [],
-          createdAt: new Date(),
+          createdAt: new Date().toISOString(),
           isProfileComplete: false, // flag so app knows to prompt for missing info
         }, { merge: true });
 
@@ -325,8 +325,27 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
     setSubmittingPassword(true);
 
     try {
-      // 1. Sign In via Auth Credentials first
-      const authResult = await withTimeout(signInWithEmailAndPassword(auth, verifiedEmail, cleanPass), 4500);
+      // 1. Sign In via Auth Credentials first with robust trimmed/untrimmed fallback and helper timeout extensions
+      let authResult;
+      try {
+        authResult = await withTimeout(signInWithEmailAndPassword(auth, verifiedEmail, cleanPass), 8000);
+      } catch (authErr: any) {
+        const isCredError = authErr.code === "auth/invalid-credential" || 
+                            authErr.code === "auth/wrong-password" || 
+                            authErr.message?.includes("invalid-credential") || 
+                            authErr.message?.includes("wrong-password");
+                            
+        if (isCredError) {
+          const trimmed = cleanPass.trim();
+          if (trimmed !== cleanPass) {
+            authResult = await withTimeout(signInWithEmailAndPassword(auth, verifiedEmail, trimmed), 8000);
+          } else {
+            throw authErr;
+          }
+        } else {
+          throw authErr;
+        }
+      }
 
       // 2. Look up corresponding profile document directly using authenticated UID
       const userDoc = await getDoc(doc(db, "users", authResult.user.uid));
@@ -507,7 +526,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
   // If in Setup fallback, render beautiful custom wizard profiles
   if (showProfileSetupFallback && pendingUser) {
     return (
-      <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-4 relative overflow-hidden text-slate-900" id="hbd-onboarding-fallback-root">
+      <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-4 relative overflow-y-auto text-slate-900" id="hbd-onboarding-fallback-root">
         {/* Colorful backgrounds */}
         <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.06),transparent_55%)] pointer-events-none" />
         <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(124,58,237,0.06),transparent_55%)] pointer-events-none" />
@@ -661,7 +680,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
   }
 
   return (
-    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-between p-6 relative overflow-hidden font-sans text-slate-900" id="hbd-login-page-root">
+    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-between p-6 relative overflow-y-auto font-sans text-slate-900" id="hbd-login-page-root">
       {/* Soft overlay elements */}
       <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.06),transparent_55%)] pointer-events-none" />
       <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(124,58,237,0.06),transparent_55%)] pointer-events-none" />

@@ -500,7 +500,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
           phoneNumber: formattedPhone || phone,
           name: name.trim() || email.split("@")[0] || "HBD Member",
           isPremium: false,
-          createdAt: new Date(),
+          createdAt: new Date().toISOString(),
           birthday: birthday || "",
           avatar: avatar || "",
           interests: interests || [],
@@ -1035,7 +1035,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
 
   if (isWaitingForVerification && savedSessionTemp) {
     return (
-      <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-5 relative overflow-hidden">
+      <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-5 relative overflow-y-auto">
         {/* Soft, warm colorful ambient radial glows */}
         <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.15),transparent_60%)] pointer-events-none" />
         <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(47,121,195,0.15),transparent_60%)] pointer-events-none" />
@@ -1145,7 +1145,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   }
 
   return (
-    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-5 relative overflow-hidden">
+    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-5 relative overflow-y-auto">
       {/* Soft, warm colorful ambient radial glows */}
       <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.15),transparent_60%)] pointer-events-none" />
       <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(47,121,195,0.15),transparent_60%)] pointer-events-none" />

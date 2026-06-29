@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import masterLogoUrl from "./assets/images/hbd_master_logo_1781644319362.jpg";
 import { INITIAL_FRIENDS, ALL_ACHIEVEMENTS_LIST } from "./data";
-import { Friend, WishlistItem, Achievement, GiftSuggestion, InAppNotification, SentGift, ReceivedGift } from "./types";
-import { WidgetSimulator } from "./components/WidgetSimulator";
+import { Friend, WishlistItem, Achievement, GiftSuggestion, InAppNotification, SentGift, ReceivedGift, WishlistFeedItem } from "./types";
 import { MOCK_EXTERNAL_PROFILES, MockProfile } from "./mockProfiles";
 import { QrScanner } from "./components/QrScanner";
 import { auth, db } from "./firebase";
@@ -68,6 +67,7 @@ import { SignUpFlow } from "./components/SignUpFlow";
 import { MandatoryOnboarding } from "./components/MandatoryOnboarding";
 import { ChatPage } from "./components/ChatPage";
 import { ConfettiBurst } from "./components/ConfettiBurst";
+import { WishlistFeed } from "./components/WishlistFeed";
 
 interface StoreGiftItem {
   id: string;
@@ -154,6 +154,54 @@ const GIFT_INVENTORY: StoreGiftItem[] = [
   }
 ];
 
+const BrandTypingLogo = () => {
+  const fullText = "HBD LOOP";
+  const [displayedText, setDisplayedText] = useState("");
+  const [cursorVisible, setCursorVisible] = useState(true);
+  const [typingComplete, setTypingComplete] = useState(false);
+
+  useEffect(() => {
+    let index = 0;
+    const interval = setInterval(() => {
+      if (index < fullText.length) {
+        setDisplayedText((prev) => prev + fullText[index]);
+        index++;
+      } else {
+        clearInterval(interval);
+        setTypingComplete(true);
+        // Fade out cursor after completion
+        setTimeout(() => {
+          setCursorVisible(false);
+        }, 600);
+      }
+    }, 120); // 120ms per letter: 8 letters * 120ms = ~960ms total typing time
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="flex items-center justify-center font-sans">
+      <h1 className="text-3xl md:text-4xl lg:text-5xl font-black tracking-tight select-none">
+        <span className="text-slate-900">
+          {displayedText.substring(0, Math.min(displayedText.length, 4))}
+        </span>
+        {displayedText.length > 4 && (
+          <span className="text-[#FF4D00]">
+            {displayedText.substring(4)}
+          </span>
+        )}
+        <span 
+          className={`ml-1 text-slate-400 font-light transition-opacity duration-300 ${
+            cursorVisible ? "opacity-100" : "opacity-0"
+          } ${!typingComplete ? "animate-pulse" : ""}`}
+        >
+          |
+        </span>
+      </h1>
+    </div>
+  );
+};
+
 export default function App() {
   // --- AUTHENTICATED USER SESSION STATE ---
   const [userSession, setUserSession] = useState<{
@@ -170,12 +218,43 @@ export default function App() {
   });
 
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [splashVisible, setSplashVisible] = useState<boolean>(true);
+  const [splashFadeOut, setSplashFadeOut] = useState<boolean>(false);
+
+  useEffect(() => {
+    const fadeTimer = setTimeout(() => {
+      setSplashFadeOut(true);
+    }, 2000);
+
+    const unmountTimer = setTimeout(() => {
+      setSplashVisible(false);
+    }, 2600);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(unmountTimer);
+    };
+  }, []);
+
   const [registryUsers, setRegistryUsers] = useState<any[]>([]);
 
   // Dynamic search input inside the Dashboard Executive Deck to discover others
   const [dashboardSearchQuery, setDashboardSearchQuery] = useState<string>("");
   const [firestoreSearchResults, setFirestoreSearchResults] = useState<any[]>([]);
   const [isSearchingFirestore, setIsSearchingFirestore] = useState<boolean>(false);
+
+  // Home layout dual-tab system and dynamic real-time crowd-gifting feed linked directly to wallet
+  const [dashboardTab, setDashboardTab] = useState<"timeline" | "wishlist">("timeline");
+  const [wishlistFeedItems, setWishlistFeedItems] = useState<WishlistFeedItem[]>(() => {
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem("hbd_wishlist_feed_items", JSON.stringify(wishlistFeedItems));
+  }, [wishlistFeedItems]);
+
+  const [activeContributingItem, setActiveContributingItem] = useState<any>(null);
+  const [contributionInput, setContributionInput] = useState<string>("");
 
   useEffect(() => {
     const searchVal = dashboardSearchQuery.trim().toLowerCase();
@@ -270,7 +349,7 @@ export default function App() {
 
   // Track the active interactive workspace section
   const [activeSection, setActiveSection] = useState<
-    "dashboard" | "registry" | "ai-lab" | "ai-lab-legacy-hidden" | "gift-store" | "my-wishlist" | "widgets" | "achievements" | "profile" | "settings" | "upgrade" | "chat"
+    "dashboard" | "registry" | "ai-lab" | "ai-lab-legacy-hidden" | "gift-store" | "my-wishlist" | "achievements" | "profile" | "settings" | "upgrade" | "chat"
   >("dashboard");
 
   const [chatMobileView, setChatMobileView] = useState<"list" | "detail">("list");
@@ -429,6 +508,24 @@ export default function App() {
     ];
   });
 
+  // Filtered list of received gifts to hide surprise gifts until the user's actual birthday
+  const visibleReceivedGifts = useMemo(() => {
+    return receivedGifts.filter(gift => {
+      if (!gift.isSurprise) return true;
+      if (!userSession || !userSession.birthday) return false;
+      try {
+        const today = new Date();
+        const parts = userSession.birthday.split("-");
+        if (parts.length >= 3) {
+          const bdMonth = parseInt(parts[1], 10) - 1;
+          const bdDate = parseInt(parts[2], 10);
+          return today.getMonth() === bdMonth && today.getDate() === bdDate;
+        }
+      } catch (e) {}
+      return false;
+    });
+  }, [receivedGifts, userSession?.birthday]);
+
   const [ledgerSubTab, setLedgerSubTab] = useState<"sent" | "received">("sent");
 
   // --- IN-APP GIFT STORE MANAGEMENT STATES ---
@@ -446,6 +543,7 @@ export default function App() {
   const [giftPaymentMethod, setGiftPaymentMethod] = useState<"momo" | "card" | "points">("momo");
   const [isGiftProcessing, setIsGiftProcessing] = useState<boolean>(false);
   const [giftProcessingStep, setGiftProcessingStep] = useState<string>( "");
+  const [giftIsSurprise, setGiftIsSurprise] = useState<boolean>(true);
 
   // Shake & Confetti premium interactions
   const [shakingGiftId, setShakingGiftId] = useState<string | null>(null);
@@ -965,7 +1063,7 @@ export default function App() {
   };
 
   // --- CONNECT & IMPORT WORKSPACE STATES ---
-  const [profileSubTab, setProfileSubTab] = useState<"settings" | "profile" | "wishlist" | "widgets" | "trophies">("settings");
+  const [profileSubTab, setProfileSubTab] = useState<"settings" | "profile" | "wishlist" | "trophies">("settings");
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = useState<boolean>(false);
   const [isPasswordResetLoading, setIsPasswordResetLoading] = useState<boolean>(false);
   const [passwordResetSuccess, setPasswordResetSuccess] = useState<boolean>(false);
@@ -995,7 +1093,7 @@ export default function App() {
       setIsPasswordResetLoading(false);
     }
   };
-  const [registrySubTab, setRegistrySubTab] = useState<"list" | "wishlist" | "widgets" | "trophies" | "connect" | "requests">("list");
+  const [registrySubTab, setRegistrySubTab] = useState<"list" | "wishlist" | "trophies" | "connect" | "requests">("list");
   const [connectMethod, setConnectMethod] = useState<"contacts" | "username">("contacts");
   const [usernameSearch, setUsernameSearch] = useState<string>("");
   const [showRelationModal, setShowRelationModal] = useState<boolean>(false);
@@ -1860,14 +1958,11 @@ export default function App() {
   // Compatibility Router Redirects for Profile subsections integration
   useEffect(() => {
     if (activeSection === "my-wishlist") {
-      setActiveSection("registry");
-      setRegistrySubTab("list");
-    } else if (activeSection === "widgets") {
-      setActiveSection("registry");
-      setRegistrySubTab("widgets");
+      setActiveSection("profile");
+      setProfileSubTab("wishlist");
     } else if (activeSection === "achievements") {
-      setActiveSection("registry");
-      setRegistrySubTab("trophies");
+      setActiveSection("profile");
+      setProfileSubTab("trophies");
     } else if (activeSection === "profile") {
       setProfileSubTab("profile");
     } else if (activeSection === "settings") {
@@ -2450,7 +2545,7 @@ export default function App() {
     
     triggerToast(
       "Buddy Welcomed!",
-      `${newFriendName} is added. Open the AI lab or widgets section to connect.`
+      `${newFriendName} is added. Open the AI lab section to connect.`
     );
   };
 
@@ -2564,19 +2659,16 @@ export default function App() {
   }, 0);
   const unlockLevel = (friends.find(f => f.id === 'alex')?.achievements.length || 0) * 2 + 1;
 
-  if (authLoading) {
+  if (authLoading || splashVisible) {
     return (
-      <div className="w-full min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-        <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] bg-indigo-600/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute -bottom-[10%] -right-[10%] w-[50%] h-[50%] bg-teal-500/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="flex flex-col items-center gap-4 text-center select-none animate-pulse">
-          <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-3xl">
-            <Cake className="w-10 h-10 animate-spin text-indigo-400 opacity-80" style={{ animationDuration: "3s" }} />
-          </div>
-          <h1 className="text-xl font-extrabold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent font-mono tracking-wider text-center">
-            HBD Loop — The Recurring Milestone &amp; Gifting Network.
-          </h1>
-          <p className="text-xs text-slate-500 font-semibold">Establishing encrypted cloud workspace...</p>
+      <div 
+        className={`w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-4 relative overflow-hidden transition-opacity duration-[600ms] ease-in-out z-[9999] ${
+          splashFadeOut ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
+        id="hbd-splash-screen"
+      >
+        <div className="flex flex-col items-center gap-4 text-center select-none">
+          <BrandTypingLogo />
         </div>
       </div>
     );
@@ -2633,7 +2725,7 @@ export default function App() {
   }
 
   return (
-    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col lg:flex-row font-sans text-slate-800" id="hbd-app-root">
+    <div className="w-full h-screen h-dvh overflow-hidden bg-[#FDFBF7] flex flex-col lg:flex-row font-sans text-slate-800" id="hbd-app-root">
       
       {/* Toast Alert Prompt Overlay */}
       <AnimatePresence>
@@ -2799,87 +2891,47 @@ export default function App() {
       <main className="flex-1 min-h-0 flex flex-col min-w-0 pb-28 lg:pb-0 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-y-auto ios-scroll-safe" id="main-canvas-wrapper">
         
         {/* TOP STATUS BAR ROW */}
-        <header className={`bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-4 justify-between items-start lg:items-center gap-4 z-10 text-left relative ${activeSection === "dashboard" ? "flex flex-col lg:flex-row" : "hidden"}`} id="main-workspace-header">
-          
-          {/* Mobile-only Branding Bar at top */}
-
-          <div className="flex w-full md:w-auto items-center justify-between md:justify-start gap-4">
-            <div>
-              <span className="text-[9px] md:text-[10px] text-indigo-600 uppercase tracking-widest font-black block">Workspace</span>
-              <h2 className="text-xl md:text-2xl lg:text-3xl font-extrabold text-slate-805 tracking-tight flex items-center gap-2">
-                {activeSection === "dashboard" && "HBD — Happy Birthday, Reimagined."}
-                {activeSection === "registry" && "Buddies"}
-                {activeSection === "ai-lab" && "Gift Ideas"}
-                {activeSection === "my-wishlist" && "My Wishlist"}
-                {activeSection === "widgets" && "Widgets"}
-                {activeSection === "achievements" && "Achievements"}
-                {activeSection === "profile" && "Profile"}
-                {activeSection === "settings" && "Settings"}
-                {activeSection === "upgrade" && "Plans"}
-                {activeSection === "chat" && "Chat & Wishes"}
-              </h2>
-            </div>
+        <header className={`bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-3 justify-between items-center gap-3 z-10 text-left relative ${activeSection === "dashboard" ? "flex flex-row" : "hidden"}`} id="main-workspace-header">
+          <div className="flex items-center gap-3">
+            <h2 className="text-[20px] font-semibold text-slate-900 tracking-tight">
+              Hey, {userSession ? userSession.name.split(" ")[0] : "Buddy"} 👋
+            </h2>
           </div>
 
-          {/* Quick Header actions integration */}
-          <div className="flex flex-wrap md:flex-nowrap items-center gap-3 w-full md:w-auto">
-            {/* Real-time Notification Bell Widget */}
-            <button
-              onClick={() => setShowNotificationDrawer(true)}
-              className="relative p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all cursor-pointer inline-flex items-center justify-center border border-slate-200"
-              title="Open Notification Feed"
-              id="notification-bell-btn"
-            >
-              <Bell className="w-4 h-4" />
-              {notifications.filter(n => !n.isRead).length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 bg-rose-600 text-[9px] font-black text-white rounded-full flex items-center justify-center px-1 font-mono animate-pulse border border-white">
-                  {notifications.filter(n => !n.isRead).length}
-                </span>
-              )}
-            </button>
-
-            {/* Premium / Upgrade Badge */}
+          <div className="flex items-center gap-2">
             {accountType === "Free" && (
               <button
                 type="button"
                 onClick={() => setActiveSection("upgrade")}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-400 to-amber-500 border border-amber-400 text-slate-900 rounded-xl text-xs font-extrabold cursor-pointer hover:from-amber-500 hover:to-amber-600 transition-all font-sans shadow-xs shrink-0"
+                className="h-9 px-3 bg-gradient-to-r from-amber-400 to-amber-500 text-slate-900 rounded-lg text-xs font-semibold hover:from-amber-500 hover:to-amber-600 transition-all shadow-xs inline-flex items-center justify-center w-auto cursor-pointer"
                 id="header-premium-badge"
               >
-                <span>✨ Upgrade</span>
+                Upgrade
               </button>
             )}
-
-            {accountType === "Pro" && (
-              <div
-                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-[10px] uppercase font-black font-mono tracking-wider select-none shrink-0"
-                id="header-premium-badge"
-              >
-                <span>PRO</span>
-              </div>
-            )}
-
-            {accountType === "Business" && (
-              <div
-                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-[10px] uppercase font-black font-mono tracking-wider select-none shrink-0"
-                id="header-premium-badge"
-              >
-                <span>BIZ</span>
-              </div>
-            )}
-
-
-
             <button
               onClick={() => {
                 setShowAddProfile(true);
                 setIsQrScannerActive(false);
               }}
-              className="flex-1 sm:flex-none justify-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-150 transition-all cursor-pointer active:scale-95"
+              className="h-9 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs transition-all w-auto cursor-pointer"
               id="header-profile-add-btn"
             >
-              <UserPlus className="w-4 h-4" />
+              <UserPlus className="w-3.5 h-3.5" />
               <span>New Buddy</span>
+            </button>
+            <button
+              onClick={() => setShowNotificationDrawer(true)}
+              className="relative w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all cursor-pointer inline-flex items-center justify-center border border-slate-200"
+              title="Open Notification Feed"
+              id="notification-bell-btn"
+            >
+              <Bell className="w-4 h-4" />
+              {notifications.filter(n => !n.isRead).length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 bg-rose-600 text-[10px] font-semibold text-white rounded-full flex items-center justify-center px-1">
+                  {notifications.filter(n => !n.isRead).length}
+                </span>
+              )}
             </button>
           </div>
         </header>
@@ -3517,12 +3569,42 @@ export default function App() {
         </AnimatePresence>
 
         {/* PRIMARY SUBCOL VIEWS PORTAL */}
-        <div className="flex-1 overflow-y-auto p-6 md:p-8" id="workspace-viewport">
+        <div className="flex-1 p-6 md:p-8" id="workspace-viewport">
           
           {/* ==================== SCREEN 1: EXECUTIVE COMMAND CENTER ==================== */}
           {activeSection === "dashboard" && (
             <div className="space-y-6" id="view-dashboard-hull">
-              {/* Upcoming Birthdays Dashboard Grid */}
+              {/* Premium Segmented Tab Selector */}
+              <div className="flex border-b border-slate-200 w-full max-w-md mx-auto h-9 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setDashboardTab("timeline")}
+                  className={`flex-1 text-center h-full text-[13px] transition-all cursor-pointer relative ${
+                    dashboardTab === "timeline"
+                      ? "font-semibold text-slate-900 border-b-2 border-indigo-600"
+                      : "font-normal text-slate-500 hover:text-slate-800"
+                  }`}
+                  id="tab-btn-timeline"
+                >
+                  Birthdays
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDashboardTab("wishlist")}
+                  className={`flex-1 text-center h-full text-[13px] transition-all cursor-pointer relative ${
+                    dashboardTab === "wishlist"
+                      ? "font-semibold text-slate-900 border-b-2 border-indigo-600"
+                      : "font-normal text-slate-500 hover:text-slate-800"
+                  }`}
+                  id="tab-btn-wishfeed"
+                >
+                  Wish Feed
+                </button>
+              </div>
+
+              {dashboardTab === "timeline" ? (
+                <div className="space-y-6">
+                  {/* Upcoming Birthdays Dashboard Grid */}
               <BirthdayDashboard 
                 friends={friends}
                 userName={userSession ? userSession.name : "Alex Patel"}
@@ -4325,6 +4407,22 @@ export default function App() {
                 </AnimatePresence>
 
               </div>
+              </div>
+              ) : (
+                <WishlistFeed
+                  wishlistFeedItems={wishlistFeedItems}
+                  setWishlistFeedItems={setWishlistFeedItems}
+                  walletBalance={walletBalance}
+                  setWalletBalance={setWalletBalance}
+                  getFormattedPrice={getFormattedPrice}
+                  appendLog={appendLog}
+                  triggerToast={triggerToast}
+                  onAddWishlist={() => {
+                    setActiveSection("profile");
+                    setProfileSubTab("wishlist");
+                  }}
+                />
+              )}
 
             </div>
           )}
@@ -4332,711 +4430,250 @@ export default function App() {
           {/* ==================== SCREEN 2: BUDDIES REGISTRY CRM ==================== */}
           {activeSection === "registry" && (
             <div className="space-y-6 text-left" id="view-registry-hull">
-
-              {/* Universal Buddies Navigation Bar */}
-
-             <div className="flex bg-slate-200/80 p-1.5 rounded-2xl w-full border border-slate-300/40 shadow-xs gap-1" id="registry-segmented-tabs">
-<button
-  type="button"
-  onClick={() => setRegistrySubTab("list")}
-  className={`flex-1 py-2 text-[11px] font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1 ${
-    registrySubTab === "list"
-      ? "bg-white text-slate-900 shadow-md"
-      : "text-slate-500 hover:text-slate-900"
-  }`}
->
-  <Users className="w-3 h-3" />
-  <span>Buddies</span>
-</button>
-<button
-  type="button"
-  onClick={() => setRegistrySubTab("connect")}
-  className={`flex-1 py-2 text-[11px] font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1 ${
-    registrySubTab === "connect"
-      ? "bg-white text-slate-900 shadow-md"
-      : "text-slate-500 hover:text-slate-900"
-  }`}
->
-  <UserPlus className="w-3 h-3" />
-  <span>Connect</span>
-</button>
-<button
-  type="button"
-  onClick={() => setRegistrySubTab("requests")}
-  className={`flex-1 py-2 text-[11px] font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1 relative ${
-    registrySubTab === "requests"
-      ? "bg-white text-slate-900 shadow-md"
-      : "text-slate-500 hover:text-slate-900"
-  }`}
->
-  <UserPlus className="w-3 h-3 text-rose-500" />
-  <span>Requests</span>
-  {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length > 0 && (
-    <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[8px] font-black rounded-full flex items-center justify-center">
-      {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length}
-    </span>
-  )}
-</button>
-
+              {/* Clean Buddies Card Header */}
+              <div className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 text-left">
+                <h3 className="text-[15px] font-semibold text-slate-900">Buddies</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Manage your friends and celebration loops</p>
               </div>
 
-              {/* Dynamic sections based on selected subtab */}
+              {/* Clean 3-tab bar: 36px tall, 3 equal sections, 13px font, underline indicator on active tab */}
+              <div className="flex border-b border-slate-200 h-9 w-full" id="registry-segmented-tabs">
+                <button
+                  type="button"
+                  onClick={() => setRegistrySubTab("list")}
+                  className={`flex-1 h-full text-[13px] font-semibold transition-all cursor-pointer relative flex items-center justify-center ${
+                    registrySubTab === "list"
+                      ? "text-indigo-600 border-b-2 border-indigo-600"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  Friends
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRegistrySubTab("connect")}
+                  className={`flex-1 h-full text-[13px] font-semibold transition-all cursor-pointer relative flex items-center justify-center ${
+                    registrySubTab === "connect"
+                      ? "text-indigo-600 border-b-2 border-indigo-600"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  Add
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRegistrySubTab("requests")}
+                  className={`flex-1 h-full text-[13px] font-semibold transition-all cursor-pointer relative flex items-center justify-center gap-1.5 ${
+                    registrySubTab === "requests"
+                      ? "text-indigo-600 border-b-2 border-indigo-600"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  <span>Requests</span>
+                  {(() => {
+                    const count = friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length;
+                    return count > 0 ? (
+                      <span className="w-4 h-4 bg-rose-600 text-white text-[10px] font-semibold rounded-full flex items-center justify-center">
+                        {count}
+                      </span>
+                    ) : null;
+                  })()}
+                </button>
+              </div>
+
               {(registrySubTab === "list" || registrySubTab === "connect" || registrySubTab === "requests") ? (
-                <div className={viewingBuddyProfile ? "block" : "grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch"}>
-                  {/* Left Column (SPAN 5) */}
-                  <div className={`${viewingBuddyProfile ? "hidden" : "lg:col-span-5"} space-y-4`}>
-                    {/* --- TAB A: MY CURRENT ROSTER CIRCLES (ORIGINAL LIST VIEW) --- */}
+                <>
+                  <div className="space-y-3">
+                    {/* Tab 1: Friends */}
                     {registrySubTab === "list" && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="space-y-4"
-                  >
-                    <div className="space-y-3">                     
-                      {/* Search Bar */}
-                      <div className="relative mb-4">
-                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                        <input
-                          type="text"
-                          placeholder="Search companions by names or tags..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9.5 pr-3 py-2 text-xs focus:ring-2 focus:outline-none"
-                        />
-                      </div>
-
-                      {/* Relationship category filters */}
-                      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-5 px-5">
-                        {["All", "Best Friend", "College Buddy", "Work Colleague", "Family Relative", "Gym Partner", "Configure Later"].map(cat => (
-                          <button
-                            key={cat}
-                            onClick={() => setFilterRelationship(cat)}
-                            className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all border shrink-0 whitespace-nowrap ${
-                              filterRelationship === cat
-                                ? "bg-indigo-600 border-indigo-600 text-white"
-                                : "bg-slate-50 border-slate-200 text-slate-650 hover:bg-slate-100"
-                            }`}
-                          >
-                            {cat === "Configure Later" ? "Unconfigured ⚠️" : cat}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Buddies Directory Card List */}
-                    <div>
-                      <div className="flex justify-between items-center mb-3">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Buddies Matches ({getFilteredFriends().length})</span>
-                        <button 
-                          onClick={() => setShowAddProfile(true)}
-                          className="text-[11px] text-indigo-600 hover:underline font-extrabold"
-                        >
-                          Add Custom Buddy +
-                        </button>
-                      </div>
-                      <div className="space-y-2">
-                        {getFilteredFriends().length === 0 ? (
-                          <div className="py-8 text-center text-slate-400">
-                            <Search className="w-8 h-8 text-slate-300 mx-auto stroke-1" />
-                            <p className="text-xs font-semibold mt-1">No matching roster items</p>
-                          </div>
-                        ) : (
-                          getFilteredFriends().map(friend => {
-                            const days = calculateDaysRemaining(friend.birthday);
-                            const isSel = friend.id === selectedFriendId;
-                            const isSelf = friend.id === "alex";
-
+                      <div className="space-y-3">
+                        {(() => {
+                          const listFriends = friends.filter(f => f.notOnHbd !== true && f.id !== "alex");
+                          if (listFriends.length === 0) {
                             return (
-                              <div
-                                key={friend.id}
-                                onClick={() => { setSelectedFriendId(friend.id); setViewingBuddyProfile(true); }}
-                                className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between cursor-pointer transition-all duration-200 ${
-                                  isSel
-                                    ? "bg-indigo-600 border-indigo-600 text-white shadow-md"
-                                    : "bg-slate-50/50 border-slate-100 hover:bg-slate-50 hover:border-slate-200"
-                                }`}
-                              >
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <span className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs text-white ${friend.avatar}`}>
-                                    {friend.name.split(" ").map(n => n[0]).join("")}
-                                  </span>
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className={`text-xs font-bold block truncate ${isSel ? "text-white" : "text-slate-800"}`}>
-                                        {friend.name}
-                                      </span>
-                                      {isSelf ? (
-                                        <span className={`text-[9.5px] font-extrabold px-1 py-0.2 rounded font-mono shrink-0 uppercase tracking-wide ${
-                                          isSel ? "bg-indigo-500/40 text-indigo-200" : "bg-slate-200/60 text-slate-600"
-                                        }`}>
-                                          Host
-                                        </span>
-                                      ) : friend.connectedBack ? (
-                                        <span className={`text-[9.5px] font-extrabold px-1.5 py-0.2 rounded font-mono shrink-0 flex items-center gap-0.5 ${
-                                          isSel 
-                                            ? "bg-indigo-500/30 text-emerald-200" 
-                                            : "bg-emerald-50 text-emerald-700"
-                                        }`}>
-                                          🤝 Linked
-                                        </span>
-                                      ) : friend.incomingRequest ? (
-                                        <span className={`text-[9.5px] font-extrabold px-1.5 py-0.2 rounded font-mono shrink-0 flex items-center gap-0.5 ${
-                                          isSel 
-                                            ? "bg-indigo-500/30 text-rose-200" 
-                                            : "bg-rose-50 text-rose-700"
-                                        }`}>
-                                          📥 Request Rec'd
-                                        </span>
-                                      ) : (
-                                        <span className={`text-[9.5px] font-extrabold px-1.5 py-0.2 rounded font-mono shrink-0 flex items-center gap-0.5 ${
-                                          isSel 
-                                            ? "bg-indigo-500/30 text-amber-200" 
-                                            : "bg-amber-50 text-amber-700"
-                                        }`}>
-                                          🕒 Request Sent
-                                        </span>
-                                      )}
-                                    </div>
-                                    <span className={`text-[10px] font-semibold block ${isSel ? "text-indigo-200" : "text-slate-500"}`}>
-                                      {friend.relationship === "Configure Later" ? "⚠️ Configure Relation" : `${friend.relationship} • Turns ${friend.age}`}
-                                    </span>
-                                    {/* Gift badge if any gift is sent */}
-                                    {(() => {
-                                      const giftCount = sentGifts.filter(g => g.friendId === friend.id).length;
-                                      if (giftCount > 0) {
-                                        return (
-                                          <span className={`inline-flex items-center gap-1 mt-1 text-[9px] font-black px-1.5 py-0.5 rounded font-mono uppercase tracking-wide shrink-0 ${
-                                            isSel ? "bg-rose-500/40 text-rose-100 border border-rose-400/30" : "bg-rose-50 text-rose-600 border border-rose-100"
-                                          }`}>
-                                            🎁 {giftCount} {giftCount === 1 ? 'gift' : 'gifts'}
-                                          </span>
-                                        );
-                                      }
-                                      return null;
-                                    })()}
-                                  </div>
-                                </div>
-
-                                <div className="text-right shrink-0">
-                                  <span className={`text-[10px] font-black block ${isSel ? "text-white" : "text-indigo-600"}`}>
-                                    {isSelf ? "🎁 You" : `In ${days} Days`}
-                                  </span>
-                                  <span className={`text-[9px] block ${isSel ? "text-indigo-200" : "text-slate-400"}`}>
-                                    {formatBirthdayDate(friend.birthday)}
-                                  </span>
-                                </div>
+                              <div className="py-8 text-center text-slate-400 space-y-1">
+                                <span className="text-[24px] block mb-1" role="img" aria-label="users">👥</span>
+                                <p className="text-[13px] font-semibold text-slate-700">No friends added yet</p>
+                                <p className="text-[11px] text-slate-400">Switch to the Add tab to connect with friends.</p>
                               </div>
                             );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                {/* --- TAB B: CONNECT & IMPORT HUB (ADDRESS BOOK & USERNAME LOOKUP) --- */}
-                {registrySubTab === "connect" && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="space-y-4"
-                  >
-                    <div className="space-y-3 text-left">
-
-                      {/* Pill Method selector */}
-                      <div className="flex bg-slate-100 p-1 rounded-xl mb-4 text-xs font-bold font-sans">
-                        <button
-                          onClick={() => setConnectMethod("contacts")}
-                          className={`flex-1 py-1.5 rounded-lg transition-colors cursor-pointer text-center ${
-                            connectMethod === "contacts"
-                              ? "bg-indigo-600 text-white"
-                              : "text-slate-505 hover:text-slate-800"
-                          }`}
-                        >
-                          Contacts Address Book
-                        </button>
-                        <button
-                          onClick={() => setConnectMethod("username")}
-                          className={`flex-1 py-1.5 rounded-lg transition-colors cursor-pointer text-center ${
-                            connectMethod === "username"
-                              ? "bg-indigo-600 text-white"
-                              : "text-slate-550 hover:text-slate-800"
-                          }`}
-                        >
-                          Username Lookup
-                        </button>
-                      </div>
-
-                      {/* Case 1: Contacts Address Book */}
-                      {connectMethod === "contacts" && (
-                        !contactsSynced ? (
-                          <div className="space-y-4 my-2">
-                            <div className="bg-slate-50 border border-slate-150 rounded-2xl p-6 text-center space-y-4">
-                              <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center mx-auto text-indigo-600">
-                                <Phone className="w-6 h-6" />
-                              </div>
-                              <div className="space-y-1">
-                                <h5 className="font-bold text-sm text-slate-800">Synchronize Address Book</h5>
-                                <p className="text-[11px] text-slate-500 leading-relaxed max-w-[240px] mx-auto">
-                                  Sync your device contacts to find buddies, family, and colleagues on the registry.
-                                </p>
-                              </div>
-                              <button
-                                onClick={handleWebContactPicker}
-                                disabled={isSyncing}
-                                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                              >
-                                {isSyncing ? (
-                                  <>
-                                    <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                                    <span>Syncing Phonebook...</span>
-                                  </>
-                                ) : (
-                                  <span>Sync Device Address Book</span>
-                                )}
-                              </button>
-                            </div>
-
-                            {/* Drag & Drop zone for files */}
-                            <div
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                setIsDraggingContactFile(true);
-                              }}
-                              onDragLeave={() => setIsDraggingContactFile(false)}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                setIsDraggingContactFile(false);
-                                const files = e.dataTransfer.files;
-                                if (files && files[0]) {
-                                  handleContactFile(files[0]);
-                                }
-                              }}
-                              className={`border-2 border-dashed rounded-2xl p-5 text-center transition-all ${
-                                isDraggingContactFile ? "border-indigo-500 bg-indigo-50/50" : "border-slate-205 bg-slate-55"
-                              }`}
-                            >
-                              <Upload className="w-7 h-7 text-indigo-400 mx-auto mb-2" />
-                              <h6 className="font-bold text-xs text-slate-800">Drag & drop contacts backup file (.csv, .vcf)</h6>
-                              <p className="text-[10px] text-slate-400">Export from Google Contacts (CSV) or iCloud (vCard) and drop here</p>
-                              <div className="mt-3">
-                                <label className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold text-slate-700 rounded-xl cursor-pointer shadow-xs inline-block transition">
-                                  Select file from storage
-                                  <input
-                                    type="file"
-                                    accept=".csv,.vcf"
-                                    className="hidden"
-                                    onChange={(e) => {
-                                      if (e.target.files && e.target.files[0]) {
-                                        handleContactFile(e.target.files[0]);
-                                      }
-                                    }}
-                                  />
-                                </label>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
-                                  Contacts Sync Status
-                                </p>
-                                <span className="text-[11px] text-emerald-600 font-extrabold flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
-                                  <span>{syncedContacts.length} Contacts Synced</span>
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => {
-                                    setShowContactSimulator(true);
-                                  }}
-                                  className="text-[9px] font-black text-indigo-600 hover:underline uppercase"
-                                >
-                                  Add Sim-Contacts
-                                </button>
-                                <span className="text-slate-300">|</span>
-                                <button
-                                  onClick={() => {
-                                    setSyncedContacts([]);
-                                    setContactsSynced(false);
-                                    triggerToast("Sync Disconnected", "Address book sync has been reset.");
-                                  }}
-                                  className="text-[9px] font-bold text-slate-400 hover:text-red-500 uppercase"
-                                >
-                                  Disconnect
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Divider uploader for adding more files when synced */}
-                            <div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-100 text-xs text-slate-650">
-                              <span>Add contact file option:</span>
-                              <label className="text-[10px] font-bold text-indigo-600 hover:underline cursor-pointer">
-                                Upload File (.csv/.vcf)
-                                <input
-                                  type="file"
-                                  accept=".csv,.vcf"
-                                  className="hidden"
-                                  onChange={(e) => {
-                                    if (e.target.files && e.target.files[0]) {
-                                      handleContactFile(e.target.files[0]);
-                                    }
-                                  }}
-                                />
-                              </label>
-                            </div>
-
-                            {/* Simple inline filter */}
-                            <div className="relative">
-                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                              <input
-                                type="text"
-                                id="contacts-filter-inp"
-                                placeholder="Search phonebook contacts..."
-                                className="w-full bg-slate-50 border border-slate-205 rounded-xl pl-9 pr-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                                onChange={(e) => {
-                                  const searchVal = e.target.value.toLowerCase().trim();
-                                  const blocks = document.querySelectorAll(".contact-card-item");
-                                  blocks.forEach(b => {
-                                    const text = b.getAttribute("data-search") || "";
-                                    if (text.includes(searchVal)) {
-                                      b.classList.remove("hidden");
-                                    } else {
-                                      b.classList.add("hidden");
-                                    }
-                                  });
-                                }}
-                              />
-                            </div>
-
-                            {/* Section breakdown */}
-                            <div className="space-y-4 max-h-[350px] overflow-y-auto pr-1">
-                              {/* 1. App Registered Matches */}
-                              <div className="space-y-2">
-                                <span className="text-[10px] uppercase font-black text-indigo-800 tracking-wider block">Matched Registry Members</span>
-                                {(() => {
-                                  let matchFound = false;
-                                  const matches = syncedContacts.map(sc => {
-                                    const registry = getSearchableProfiles();
-                                    const matched = registry.find(p => {
-                                      const scPhone = (sc.phone || "").replace(/[^0-9]/g, "");
-                                      const pPhone = (p.phone || "").replace(/[^0-9]/g, "");
-                                      return (
-                                        (scPhone && pPhone && pPhone.includes(scPhone)) ||
-                                        (sc.email && p.email && sc.email.toLowerCase().trim() === p.email.toLowerCase().trim()) ||
-                                        (sc.name.toLowerCase().trim() === p.name.toLowerCase().trim())
-                                      );
-                                    });
-                                    if (matched) matchFound = true;
-                                    return { sc, matched };
-                                  }).filter(item => item.matched);
-
-                                  if (!matchFound) {
-                                    return <p className="text-[10px] text-slate-400 italic font-medium p-2">No active members matched this address list yet.</p>;
-                                  }
-
-                                  return matches.map(({ sc, matched }, idx) => {
-                                    if (!matched) return null;
-                                    const isConnected = friends.some(f => f.id === matched.id || (f as any).username === matched.username);
-                                    const searchStr = `${sc.name.toLowerCase()} ${sc.phone || ""} ${sc.email || ""}`;
-                                    return (
-                                      <div
-                                        key={`match-${idx}`}
-                                        data-search={searchStr}
-                                        className="contact-card-item flex items-center justify-between p-3 bg-white rounded-2xl border border-slate-105 hover:bg-slate-50 transition"
-                                      >
-                                        <div className="flex items-center gap-2.5">
-                                          <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${matched.avatar || "bg-indigo-500"}`}>
-                                            {sc.name.split(" ").map(n => n[0] || "").join("")}
-                                          </span>
-                                          <div>
-                                            <span className="text-xs font-bold text-slate-800 block">{sc.name}</span>
-                                            <span className="text-[9px] text-indigo-500 font-mono">@{matched.username} &bull; Verified Member</span>
-                                          </div>
-                                        </div>
-                                        {isConnected ? (
-                                          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
-                                            Connected
-                                          </span>
-                                        ) : (
-                                          <button
-                                            onClick={() => handleImportInitiate(matched as any)}
-                                            className="text-[10.5px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl cursor-pointer shadow-xs active:scale-95"
-                                          >
-                                            Link 🤝
-                                          </button>
-                                        )}
-                                      </div>
-                                    );
-                                  });
-                                })()}
-                              </div>
-
-                              {/* 2. Offline Contacts (Can track offline) */}
-                              <div className="space-y-2 pt-2 border-t border-slate-100">
-                                <span className="text-[10px] uppercase font-black text-slate-705 tracking-wider block">Local Celebrants (Offline trackable)</span>
-                                {(() => {
-                                  const offline = syncedContacts.filter(sc => {
-                                    const registry = getSearchableProfiles();
-                                    const isMatched = registry.some(p => {
-                                      const scPhone = (sc.phone || "").replace(/[^0-9]/g, "");
-                                      const pPhone = (p.phone || "").replace(/[^0-9]/g, "");
-                                      return (
-                                        (scPhone && pPhone && pPhone.includes(scPhone)) ||
-                                        (sc.email && p.email && sc.email.toLowerCase().trim() === p.email.toLowerCase().trim()) ||
-                                        (sc.name.toLowerCase().trim() === p.name.toLowerCase().trim())
-                                      );
-                                    });
-                                    return !isMatched;
-                                  });
-
-                                  if (offline.length === 0) {
-                                    return <p className="text-[10px] text-slate-400 italic font-medium p-2">No other contacts to display.</p>;
-                                  }
-
-                                  return offline.map((sc, idx) => {
-                                    const isConnected = friends.some(f => f.name.toLowerCase().trim() === sc.name.toLowerCase().trim());
-                                    const searchStr = `${sc.name.toLowerCase()} ${sc.phone || ""} ${sc.email || ""}`;
-                                    return (
-                                      <div
-                                        key={`off-${idx}`}
-                                        data-search={searchStr}
-                                        className="contact-card-item flex items-center justify-between p-3 bg-slate-50/50 rounded-2xl border border-slate-100 hover:bg-slate-50/80 transition"
-                                      >
-                                        <div className="flex items-center gap-2.5">
-                                          <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${sc.avatar || "bg-indigo-500"}`}>
-                                            {sc.name.split(" ").map(n => n[0] || "").join("")}
-                                          </span>
-                                          <div>
-                                            <span className="text-xs font-bold text-slate-800 block">{sc.name}</span>
-                                            <span className="text-[9px] text-slate-400 block font-normal font-sans">
-                                              Not on HBD yet &bull; Private local tracking
-                                            </span>
-                                          </div>
-                                        </div>
-                                        {isConnected ? (
-                                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg">
-                                            Tracking 🎂
-                                          </span>
-                                        ) : (
-                                          <div className="flex gap-1.5 shrink-0">
-                                            <button
-                                              onClick={() => {
-                                                const inviteText = `Join me on HBD so we can connect birthday reminders: ${window.location.origin}/?user=${encodeURIComponent(userSession?.username || "")}`;
-                                                window.open(`https://wa.me/?text=${encodeURIComponent(inviteText)}`, "_blank", "noopener,noreferrer");
-                                              }}
-                                              className="text-[10.5px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-xl cursor-pointer"
-                                            >
-                                              Invite
-                                            </button>
-                                            <button
-                                              onClick={() => handleImportLocalContact(sc as any)}
-                                              className="text-[10.5px] font-bold text-indigo-600 hover:text-indigo-750 bg-indigo-50/60 hover:bg-indigo-100/50 px-3 py-1.5 rounded-xl cursor-pointer"
-                                            >
-                                              Track
-                                            </button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  });
-                                })()}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      )}
-
-                      {/* Case 2: Username Lookup */}
-                      {connectMethod === "username" && (
-                        <div className="space-y-3">
-                          <label className="block text-[10px] font-bold uppercase text-indigo-800">Lookup user handle</label>
-                          <div className="relative">
-                            <input
-                              type="text"
-                              value={usernameSearch}
-                              onChange={(e) => setUsernameSearch(e.target.value)}
-                              placeholder="Type handle e.g. elena_zen, biker_zoe..."
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
-                            />
-                            {usernameSearch && (
-                              <button 
-                                onClick={() => setUsernameSearch("")} 
-                                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-650"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1 pt-1">
-                            {!usernameSearch.trim() ? (
-                              <div className="text-center py-6 text-xs text-slate-400 font-semibold">
-                                🔍 Type a username handle above to locate accounts.
-                              </div>
-                            ) : (
-                              (() => {
-                                const query = usernameSearch.trim().toLowerCase();
-                                const matched = registryUsers
-                                  .filter(r => r.username?.toLowerCase() === query)
-                                  .map(r => ({
-                                    id: r.uid,
-                                    name: r.name,
-                                    username: r.username,
-                                    phone: r.phone || "",
-                                    birthday: r.birthday || "",
-                                    age: r.age || "",
-                                    avatar: r.avatar || "bg-indigo-500",
-                                    interests: r.interests || [],
-                                    wishlistToPost: r.wishlist || []
-                                  }));
-
-                                if (matched.length === 0) {
-                                  return (
-                                    <div className="text-center py-6 text-xs text-slate-400 font-medium">
-                                      No matches found for &quot;{usernameSearch}&quot;
-                                    </div>
-                                  );
-                                }
-
-                                return matched.map(p => {
-                                  const isConnected = friends.some(f => f.id === p.id || (f as any).username === p.username);
-
-                                  return (
-<div
-  key={p.id}
-  className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 hover:bg-slate-50 transition"
->
-  <div className="flex items-center gap-2.5">
-    <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs text-white font-bold ${p.avatar}`}>
-      {p.name.split(" ").map((n: string) => n[0] || "").join("")}
-    </span>
-    <div>
-      <span className="text-xs font-bold text-slate-800 block">{p.name}</span>
-      <span className="text-[10px] text-indigo-500 font-mono">@{p.username}</span>
-    </div>
-  </div>
-  {isConnected ? (
-    <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
-      Connected
-    </span>
-  ) : (
-    <button
-      onClick={() => handleImportInitiate(p as any)}
-      className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl cursor-pointer"
-    >
-      Connect +
-    </button>
-  )}
-</div>
-);
-                                });
-                              })()
-                            )}
-</div>
-</div>
-)}
-                    </div>
-
-
-                  </motion.div>
-                )}
-                {/* --- TAB C: FRIEND REQUESTS --- */}
-                {registrySubTab === "requests" && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="space-y-6"
-                  >
-                    {/* INCOMING REQUESTS SECTION */}
-                    <div className="space-y-3">
-                      <h4 className="text-[11px] font-black uppercase text-slate-400 tracking-wider">Inbox (Received Requests)</h4>
-                      {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length === 0 ? (
-                        <div className="bg-slate-50/55 rounded-2xl border border-dashed border-slate-205 p-6 text-center">
-                          <p className="text-xs font-semibold text-slate-400">No incoming friendship requests</p>
-                        </div>
-                      ) : (
-                        friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).map(f => (
-                          <div key={f.id} className="bg-white rounded-2xl border border-indigo-100 p-4 flex items-center justify-between shadow-xs">
-                            <div className="flex items-center gap-3">
-                              <span className={`w-10 h-10 rounded-xl ${f.avatar} text-white flex items-center justify-center font-bold text-sm`}>
-                                {f.name.split(" ").map(n => n[0]).join("")}
-                              </span>
-                              <div>
-                                <span className="text-sm font-bold text-slate-800 block">{f.name}</span>
-                                <span className="text-[10px] text-slate-400">{f.relationship}</span>
-                              </div>
-                            </div>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => handleAcceptFriendRequest(f)}
-                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
-                              >Accept</button>
-                              <button
-                                onClick={() => handleDeclineFriendRequest(f)}
-                                className="px-3 py-1.5 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-600 text-xs font-bold rounded-xl cursor-pointer"
-                              >Decline</button>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    {/* OUTGOING REQUESTS SECTION */}
-                    <div className="space-y-3 pt-2 border-t border-slate-100">
-                      <h4 className="text-[11px] font-black uppercase text-slate-400 tracking-wider">Sent (Pending Acceptance)</h4>
-                      {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === false).length === 0 ? (
-                        <div className="bg-slate-50/55 rounded-2xl border border-dashed border-slate-205 p-6 text-center">
-                          <p className="text-xs font-semibold text-slate-400">No pending sent invitations</p>
-                        </div>
-                      ) : (
-                        friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === false).map(f => {
-                          const matchingRealUser = registryUsers.find(r => r.username === f.snapchat || r.uid === f.id);
-                          const isSimulated = !matchingRealUser; // If they are not registered in Firestore, they are a mockup sandbox profile!
-                          
+                          }
                           return (
-                            <div key={f.id} className="bg-white rounded-2xl border border-slate-100 p-4 flex items-center justify-between shadow-xs">
-                              <div className="flex items-center gap-3">
-                                <span className={`w-10 h-10 rounded-xl ${f.avatar} text-white flex items-center justify-center font-bold text-sm`}>
-                                  {f.name.split(" ").map(n => n[0]).join("")}
-                                </span>
-                                <div>
-                                  <span className="text-sm font-bold text-slate-800 block">{f.name}</span>
-                                  <div className="flex items-center gap-1.5 mt-0.5">
-                                    <span className="text-[9.5px] text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded-lg">🕒 Request Sent</span>
-                                    {isSimulated && (
-                                      <span className="text-[8.5px] text-slate-400 font-bold bg-slate-100 px-1.5 py-0.5 rounded-lg uppercase tracking-wide">Offline Simulation</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex gap-2">
-                                {isSimulated ? (
-                                  <button
-                                    onClick={() => handleSimulateAccept(f)}
-                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10.5px] font-bold rounded-xl cursor-pointer flex items-center gap-1 shadow-xs transition"
+                            <div className="flex flex-col gap-2">
+                              {listFriends.map(friend => {
+                                const days = calculateDaysRemaining(friend.birthday);
+                                const initials = friend.name.split(" ").map(n => n[0] || "").join("").toUpperCase();
+                                return (
+                                  <div
+                                    key={friend.id}
+                                    onClick={() => {
+                                      setSelectedFriendId(friend.id);
+                                      setViewingBuddyProfile(true);
+                                    }}
+                                    className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
                                   >
-                                    <span>Simulate Accept 🤝</span>
-                                  </button>
-                                ) : (
-                                  <span className="text-[10px] font-bold bg-slate-50 border border-slate-150 px-2.5 py-1.5 rounded-xl text-slate-400 select-none">
-                                    Awaiting User...
-                                  </span>
-                                )}
-                              </div>
+                                    <div className="flex items-center gap-2.5 truncate">
+                                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-[11px] text-white shrink-0 ${friend.avatar || "bg-rose-500"}`}>
+                                        {initials}
+                                      </div>
+                                      <div className="truncate">
+                                        <p className="text-[13px] font-semibold text-slate-900 truncate">{friend.name}</p>
+                                        <p className="text-[11px] text-slate-400 truncate">@{friend.id}</p>
+                                      </div>
+                                    </div>
+                                    <span className="text-[11px] font-semibold text-indigo-600 font-mono shrink-0">
+                                      {days === 0 ? "Today! 🎉" : `in ${days}d`}
+                                    </span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           );
-                        })
-                      )}
+                        })()}
+                      </div>
+                    )}
+
+                    {/* Tab 2: Add */}
+                    {registrySubTab === "connect" && (
+                      <div className="space-y-4">
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                          <input
+                            type="text"
+                            placeholder="Search by username..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full h-9 bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 text-[13px] outline-none focus:border-indigo-600 focus:bg-white transition-colors"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Suggested Contacts</h4>
+                          <div className="flex flex-col gap-2">
+                            {[
+                              { name: "Sophia Mitchell", phone: "+1 415-382-9421", initials: "SM" },
+                              { name: "Liam Nkrumah", phone: "+233 24-412-3456", initials: "LN" },
+                              { name: "Chloe Henderson", phone: "+44 7700-900077", initials: "CH" },
+                              { name: "Julian Alcaraz", phone: "+34 600-123456", initials: "JA" },
+                              { name: "Amara Diop", phone: "+221 77-512-3456", initials: "AD" }
+                            ].filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).map((contact, idx) => (
+                              <div key={idx} className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2.5 truncate">
+                                  <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold flex items-center justify-center shrink-0">
+                                    {contact.initials}
+                                  </div>
+                                  <div className="truncate">
+                                    <p className="text-[13px] font-semibold text-slate-900 truncate">{contact.name}</p>
+                                    <p className="text-[11px] font-mono text-slate-400">{contact.phone}</p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => triggerToast("Invitation Sent", `SMS invite sent to ${contact.name}`)}
+                                  className="h-8 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-semibold rounded-lg transition-colors cursor-pointer shrink-0"
+                                >
+                                  Add
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tab 3: Requests */}
+                    {registrySubTab === "requests" && (
+                      <div className="space-y-4">
+                        {(() => {
+                          const incoming = friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true);
+                          const outgoing = friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest !== true);
+
+                          if (incoming.length === 0 && outgoing.length === 0) {
+                            return (
+                              <div className="py-8 text-center text-slate-400 space-y-1">
+                                <span className="text-[24px] block mb-1" role="img" aria-label="mail">📬</span>
+                                <p className="text-[13px] font-semibold text-slate-700">No pending requests</p>
+                                <p className="text-[11px] text-slate-400">Incoming and outgoing friend requests will appear here.</p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="space-y-4">
+                              {incoming.length > 0 && (
+                                <div className="space-y-2">
+                                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Incoming Requests</h4>
+                                  <div className="flex flex-col gap-2">
+                                    {incoming.map(f => (
+                                      <div key={f.id} className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 flex items-center justify-between">
+                                        <div className="flex items-center gap-2.5 truncate">
+                                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-[11px] text-white shrink-0 ${f.avatar || "bg-indigo-600"}`}>
+                                            {f.name.split(" ").map(n => n[0] || "").join("").toUpperCase()}
+                                          </div>
+                                          <div className="truncate">
+                                            <p className="text-[13px] font-semibold text-slate-900 truncate">{f.name}</p>
+                                            <p className="text-[11px] text-slate-400 truncate">@{f.id}</p>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAcceptFriendRequest(f)}
+                                            className="h-8 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-semibold rounded-lg cursor-pointer transition-colors"
+                                          >
+                                            Accept
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeclineFriendRequest(f)}
+                                            className="h-8 px-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-semibold rounded-lg cursor-pointer transition-colors"
+                                          >
+                                            Decline
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {outgoing.length > 0 && (
+                                <div className="space-y-2">
+                                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Outgoing Requests</h4>
+                                  <div className="flex flex-col gap-2">
+                                    {outgoing.map(f => (
+                                      <div key={f.id} className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 flex items-center justify-between">
+                                        <div className="flex items-center gap-2.5 truncate">
+                                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-[11px] text-white shrink-0 ${f.avatar || "bg-slate-500"}`}>
+                                            {f.name.split(" ").map(n => n[0] || "").join("").toUpperCase()}
+                                          </div>
+                                          <div className="truncate">
+                                            <p className="text-[13px] font-semibold text-slate-900 truncate">{f.name}</p>
+                                            <p className="text-[11px] text-slate-400 truncate">Pending acceptance</p>
+                                          </div>
+                                        </div>
+                                        <span className="text-[11px] font-semibold text-slate-400 shrink-0">Sent</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                            Invite to Loop
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </motion.div>
                 )}
-
               </div>
-
               {/* Right Companion Detail cockpit area (SPAN 7) */}
               <div className={viewingBuddyProfile ? "fixed inset-0 bg-white z-50 overflow-y-auto p-6" : "hidden"}>
                 <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-6 md:p-8 space-y-6">
@@ -5649,8 +5286,8 @@ export default function App() {
 
                 </div>
               </div>
-              </div>
-            ) : (
+            </>
+          ) : (
               <div className="w-full">
                 {registrySubTab === "wishlist" && (
                   <div className="space-y-6 animate-fade-in" id="profile-subtab-wishlist">
@@ -5824,20 +5461,6 @@ export default function App() {
     </form>
   )}
 </div>
-                    </div>
-                  </div>
-                )}
-                {registrySubTab === "widgets" && (
-                  <div className="space-y-6 animate-fade-in" id="profile-subtab-widgets">
-                    <div className="bg-white p-6 rounded-3xl border border-slate-200 text-left header-explain-widgets">
-                      <h3 className="font-black text-lg text-slate-900">Interactive Device Complication Simulator</h3>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Adjust preferences on the customizer control panel to see live lock screen complications or homescreen frames automatically synchronized dynamically.
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-50 rounded-[2rem] border border-slate-200/50 p-2 md:p-4">
-                      <WidgetSimulator friends={friends} />
                     </div>
                   </div>
                 )}
@@ -7408,60 +7031,52 @@ export default function App() {
             <div className="space-y-6 text-left animate-fade-in relative" id="view-gift-store-hull">
               <ConfettiBurst active={showPurchaseConfetti} mode="rain" onComplete={() => setShowPurchaseConfetti(false)} />
               {/* My Wallet Card */}
-              <div className="bg-white border border-slate-200 rounded-[2rem] p-6 md:p-8 shadow-sm text-left relative overflow-hidden transition-all duration-300 hover:shadow-md" id="wallet-card-container">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">👛</span>
-                      <h3 className="text-xl font-black text-slate-900 dark:text-white">My Wallet</h3>
+              <div className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 text-left space-y-3" id="wallet-card-container">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] text-slate-400 font-normal block truncate">Available Balance</span>
+                    <div className="text-[24px] font-semibold text-slate-900 font-mono mt-0.5">
+                      GHS {walletBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <div className="space-y-1">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Available Balance</span>
-                      <div className="text-3xl font-black text-slate-900 dark:text-white font-mono">
-                        GHS {walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <p className="text-[11px] text-slate-400 max-w-md italic font-sans">
-                      Gifts received on your birthday are paid into your wallet automatically
-                    </p>
                   </div>
+                  <span className="text-[24px]" role="img" aria-label="wallet">👛</span>
+                </div>
 
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowDepositForm(!showDepositForm);
-                        setShowWithdrawForm(false);
-                      }}
-                      className={`px-5 py-2.5 rounded-xl font-extrabold text-xs transition duration-200 cursor-pointer ${
-                        showDepositForm 
-                          ? "bg-indigo-105 text-indigo-700 bg-indigo-50 border border-indigo-200" 
-                          : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
-                      }`}
-                    >
-                      Deposit ↗
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowWithdrawForm(!showWithdrawForm);
-                        setShowDepositForm(false);
-                      }}
-                      className={`px-5 py-2.5 rounded-xl font-extrabold text-xs transition duration-200 cursor-pointer ${
-                        showWithdrawForm 
-                          ? "bg-slate-205 text-slate-800 bg-slate-100 border border-slate-300" 
-                          : "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200"
-                      }`}
-                    >
-                      Withdraw ↙
-                    </button>
-                  </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDepositForm(!showDepositForm);
+                      setShowWithdrawForm(false);
+                    }}
+                    className={`flex-1 h-10 px-3 rounded-lg font-semibold text-[12px] transition-colors cursor-pointer ${
+                      showDepositForm
+                        ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                        : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                    }`}
+                  >
+                    Deposit ↗
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowWithdrawForm(!showWithdrawForm);
+                      setShowDepositForm(false);
+                    }}
+                    className={`flex-1 h-10 px-3 rounded-lg font-semibold text-[12px] transition-colors cursor-pointer border ${
+                      showWithdrawForm
+                        ? "bg-slate-100 text-slate-800 border-slate-300"
+                        : "bg-white hover:bg-slate-50 text-slate-700 border-slate-300"
+                    }`}
+                  >
+                    Withdraw ↙
+                  </button>
                 </div>
 
                 {/* Expanded Deposit Form */}
                 {showDepositForm && (
-                  <div className="mt-4 pt-4 border-t border-slate-100 animate-slide-down space-y-3 max-w-md">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <div className="pt-2 border-t border-slate-100 space-y-2">
+                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                       Amount to Deposit (GHS)
                     </label>
                     <div className="flex gap-2">
@@ -7471,7 +7086,7 @@ export default function App() {
                         placeholder="e.g. 50"
                         value={depositAmount}
                         onChange={(e) => setDepositAmount(e.target.value)}
-                        className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:border-indigo-500"
+                        className="flex-1 h-9 bg-slate-50 border border-slate-300 rounded-lg px-3 text-[13px] font-mono outline-none focus:border-indigo-600 focus:bg-white transition-colors"
                       />
                       <button
                         type="button"
@@ -7481,15 +7096,15 @@ export default function App() {
                             triggerToast("Error", "Please enter a valid positive deposit amount.");
                             return;
                           }
-                          setWalletBalance(prev => prev + amt);
-                          triggerToast("Deposit Successful 🎉", `Added GHS ${amt.toFixed(2)} to your wallet balance.`);
+                          setWalletBalance((prev) => prev + amt);
+                          triggerToast("Deposit Successful", `Added GHS ${amt.toFixed(2)} to your wallet balance.`);
                           setDepositAmount("");
                           setShowDepositForm(false);
                           playNotificationSound();
                         }}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                        className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[12px] px-3 rounded-lg transition-colors cursor-pointer shrink-0"
                       >
-                        Confirm Deposit
+                        Confirm
                       </button>
                     </div>
                   </div>
@@ -7497,8 +7112,8 @@ export default function App() {
 
                 {/* Expanded Withdraw Form */}
                 {showWithdrawForm && (
-                  <div className="mt-4 pt-4 border-t border-slate-100 animate-slide-down space-y-3 max-w-md">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <div className="pt-2 border-t border-slate-100 space-y-2">
+                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                       Amount to Withdraw (GHS)
                     </label>
                     <div className="flex gap-2">
@@ -7508,7 +7123,7 @@ export default function App() {
                         placeholder="e.g. 20"
                         value={withdrawAmount}
                         onChange={(e) => setWithdrawAmount(e.target.value)}
-                        className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:border-indigo-500"
+                        className="flex-1 h-9 bg-slate-50 border border-slate-300 rounded-lg px-3 text-[13px] font-mono outline-none focus:border-indigo-600 focus:bg-white transition-colors"
                       />
                       <button
                         type="button"
@@ -7522,15 +7137,15 @@ export default function App() {
                             triggerToast("Insufficient Funds", "You do not have enough balance to withdraw this amount.");
                             return;
                           }
-                          setWalletBalance(prev => prev - amt);
-                          triggerToast("Withdrawal Successful 💸", `Withdrew GHS ${amt.toFixed(2)} from your wallet balance.`);
+                          setWalletBalance((prev) => prev - amt);
+                          triggerToast("Withdrawal Successful", `Withdrew GHS ${amt.toFixed(2)} from your wallet balance.`);
                           setWithdrawAmount("");
                           setShowWithdrawForm(false);
                           playNotificationSound();
                         }}
-                        className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                        className="h-9 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-[12px] px-3 rounded-lg transition-colors cursor-pointer shrink-0"
                       >
-                        Confirm Withdraw
+                        Confirm
                       </button>
                     </div>
                   </div>
@@ -7538,54 +7153,51 @@ export default function App() {
               </div>
 
               {/* Sub Navigation Switcher */}
-              <div className="flex bg-slate-100 p-1 rounded-2xl w-full border border-slate-200 shadow-sm max-w-sm" id="store-tabs-wrapper">
+              <div className="flex bg-slate-100 p-1 rounded-lg w-full h-9" id="store-tabs-wrapper">
                 <button
                   type="button"
                   onClick={() => setGiftStoreTab("gallery")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  className={`flex-1 h-full text-[12px] font-semibold rounded transition-all cursor-pointer flex items-center justify-center ${
                     giftStoreTab === "gallery"
-                      ? "bg-white text-slate-800 shadow-sm"
+                      ? "bg-white text-slate-900 shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
                       : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  <Gift className="w-3.5 h-3.5 text-rose-505" />
-                  <span>Send Gifts</span>
+                  Send
                 </button>
                 <button
                   type="button"
                   onClick={() => setGiftStoreTab("ledger")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  className={`flex-1 h-full text-[12px] font-semibold rounded transition-all cursor-pointer flex items-center justify-center ${
                     giftStoreTab === "ledger"
-                      ? "bg-white text-slate-800 shadow-sm"
+                      ? "bg-white text-slate-900 shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
                       : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  <Activity className="w-3.5 h-3.5 text-indigo-505" />
-                  <span>Sent Gifts ({sentGifts.length})</span>
+                  Sent ({sentGifts.length})
                 </button>
                 <button
                   type="button"
                   onClick={() => setGiftStoreTab("pools")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  className={`flex-1 h-full text-[12px] font-semibold rounded transition-all cursor-pointer flex items-center justify-center ${
                     giftStoreTab === "pools"
-                      ? "bg-white text-slate-800 shadow-sm"
+                      ? "bg-white text-slate-900 shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
                       : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  <Gift className="w-3.5 h-3.5 text-violet-505" />
-                  <span>Pools ({activeGiftPools.length})</span>
+                  Pools
                 </button>
               </div>
 
               {/* TAB 1: BOUTIQUE GALLERY */}
               {giftStoreTab === "gallery" && (
-                <div className="space-y-6">
+                <div className="space-y-3">
                   {/* Swipeable single-gift carousel */}
                   <motion.div
                     key={selectedStoreGift.id}
-                    initial={{ opacity: 0, x: 24 }}
+                    initial={{ opacity: 0, x: 16 }}
                     animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -24 }}
+                    exit={{ opacity: 0, x: -16 }}
                     onPointerDown={(e) => setGiftSwipeStartX(e.clientX)}
                     onPointerUp={(e) => {
                       if (giftSwipeStartX === null) return;
@@ -7597,124 +7209,94 @@ export default function App() {
                       }
                       setGiftSwipeStartX(null);
                     }}
-                    className="bg-white border border-rose-100 shadow-xs p-5 md:p-7 rounded-[2rem] text-left relative overflow-hidden"
+                    className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 text-left space-y-3 relative overflow-hidden"
                   >
-                    <div className="absolute top-0 right-0 w-40 h-40 bg-rose-50/70 rounded-bl-full pointer-events-none -mr-8 -mt-8" />
-                    <div className="relative z-10">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <span className="bg-rose-50 text-rose-700 text-[9px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider border border-rose-100/40">
-                            {selectedStoreGift.category}
-                          </span>
-                          <h4 className="font-black text-2xl text-zinc-900 mt-4">{selectedStoreGift.name}</h4>
-                          <p className="text-sm text-zinc-500 mt-2 leading-relaxed">{selectedStoreGift.description}</p>
+                    {/* Header: emoji 24px + title 14px semibold + category hint */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-slate-400 font-normal uppercase tracking-wider block">
+                          {selectedStoreGift.category}
+                        </span>
+                        <div className="flex items-center gap-2 mt-1 truncate">
+                          <span className="text-[24px] shrink-0" role="img" aria-label={selectedStoreGift.name}>{selectedStoreGift.emoji}</span>
+                          <h4 className="text-[14px] font-semibold text-slate-900 truncate">{selectedStoreGift.name}</h4>
                         </div>
-                        <div className="text-5xl filter drop-shadow-xs shrink-0">{selectedStoreGift.emoji}</div>
+                        <p className="text-[11px] text-slate-400 truncate mt-0.5">{selectedStoreGift.description}</p>
                       </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-7">
-                        <div className="md:col-span-2 space-y-3">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-slate-400">Contribution amount</label>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-black text-slate-500">GHS</span>
-                            <input
-                              type="number"
-                              min={giftAmountMin}
-                              max={giftAmountMax}
-                              value={giftContributionAmount}
-                              onChange={(e) => setGiftContributionAmount(e.target.value)}
-                              className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-mono outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
-                            />
-                          </div>
-                          <p className="text-[11px] text-slate-500">Choose any amount from GHS {giftAmountMin} to GHS {giftAmountMax}.</p>
-                        </div>
-
-                        <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4 flex flex-col justify-between">
-                          <div>
-                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Suggested unit</span>
-                            <span className="text-lg font-black text-rose-600 font-mono mt-1 block">{getFormattedPrice(selectedStoreGift.usdPrice)}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 mt-4">
-                            <button
-                              type="button"
-                              onClick={() => setGiftCarouselIndex((prev) => (prev - 1 + GIFT_INVENTORY.length) % GIFT_INVENTORY.length)}
-                              className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-black"
-                              aria-label="Previous gift"
-                            >
-                              ‹
-                            </button>
-                            <div className="flex gap-1.5">
-                              {GIFT_INVENTORY.map((_, index) => (
-                                <span
-                                  key={index}
-                                  className={`h-1.5 rounded-full transition-all ${index === giftCarouselIndex ? "w-6 bg-rose-500" : "w-1.5 bg-slate-200"}`}
-                                />
-                              ))}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setGiftCarouselIndex((prev) => (prev + 1) % GIFT_INVENTORY.length)}
-                              className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-black"
-                              aria-label="Next gift"
-                            >
-                              ›
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                        <button
-                          onClick={() => {
-                            const amount = Number(giftContributionAmount);
-                            if (!amount || amount < giftAmountMin || amount > giftAmountMax) {
-                              triggerToast("Invalid Amount", `Enter GHS ${giftAmountMin} to GHS ${giftAmountMax}.`);
-                              return;
-                            }
-                            setCustomGiftStoreItem({ id: selectedStoreGift.id, name: selectedStoreGift.name, type: selectedStoreGift.type, usdPrice: selectedStoreGift.usdPrice });
-                            if (friends.length > 0) {
-                              setGiftRecipientId(friends[0].id);
-                              const yr = new Date().getFullYear();
-                              const bdy = friends[0].birthday;
-                              if (bdy) {
-                                const parts = bdy.split("-");
-                                setGiftRevealDate(parts.length === 3 ? `${yr}-${parts[1]}-${parts[2]}` : getTodayDateString());
-                              } else {
-                                setGiftRevealDate(getTodayDateString());
-                              }
-                            } else {
-                              setGiftRecipientId("");
-                              setGiftRevealDate(getTodayDateString());
-                            }
-                            setGiftRecipientMessage(`Sending ${selectedStoreGift.emoji} ${selectedStoreGift.name} with a GHS ${amount.toFixed(2)} celebration gift.`);
-                            setGiftPaymentMethod("momo");
-                          }}
-                          className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs px-5 py-3.5 rounded-2xl cursor-pointer transition-all active:scale-[0.98] shadow-sm"
-                        >
-                          Customize &amp; Send
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setGiftCarouselIndex((prev) => (prev + 1) % GIFT_INVENTORY.length)}
-                          className="px-5 py-3.5 rounded-2xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-black text-xs"
-                        >
-                          Swipe next gift
-                        </button>
-                      </div>
+                      <span className="text-[12px] font-semibold text-indigo-600 font-mono shrink-0">
+                        {getFormattedPrice(selectedStoreGift.usdPrice)}
+                      </span>
                     </div>
-                  </motion.div>
 
-                  <div className="bg-rose-50 border border-rose-100 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center gap-4 text-left">
-                    <div className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center font-black shrink-0 animate-pulse">
-                      ℹ️
-                    </div>
-                    <div>
-                      <span className="text-xs font-black text-zinc-800 block">Workspace Delivery &amp; Scheduler Guarantee</span>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Whenever you purchase a gift, you can configure a specific **scheduled reveal date**. The present will remain securely locked in localStorage/the platform registry until the chosen date. Once reached, is automatic-unlocked, sending instant chimes &amp; in-app dashboard signals!
+                    {/* Contribution Input Area */}
+                    <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                        Contribution Amount (GHS)
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={giftAmountMin}
+                          max={giftAmountMax}
+                          value={giftContributionAmount}
+                          onChange={(e) => setGiftContributionAmount(e.target.value)}
+                          className="flex-1 h-9 bg-slate-50 border border-slate-300 rounded-lg px-3 text-[13px] font-mono outline-none focus:border-indigo-600 focus:bg-white transition-colors"
+                        />
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Any amount from GHS {giftAmountMin} to GHS {giftAmountMax}
                       </p>
                     </div>
-                  </div>
+
+                    {/* Send Button */}
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const amount = Number(giftContributionAmount);
+                          if (!amount || amount < giftAmountMin || amount > giftAmountMax) {
+                            triggerToast("Invalid Amount", `Enter GHS ${giftAmountMin} to GHS ${giftAmountMax}.`);
+                            return;
+                          }
+                          setCustomGiftStoreItem({ id: selectedStoreGift.id, name: selectedStoreGift.name, type: selectedStoreGift.type, usdPrice: selectedStoreGift.usdPrice });
+                          if (friends.length > 0) {
+                            setGiftRecipientId(friends[0].id);
+                            const yr = new Date().getFullYear();
+                            const bdy = friends[0].birthday;
+                            if (bdy) {
+                              const parts = bdy.split("-");
+                              setGiftRevealDate(parts.length === 3 ? `${yr}-${parts[1]}-${parts[2]}` : getTodayDateString());
+                            } else {
+                              setGiftRevealDate(getTodayDateString());
+                            }
+                          } else {
+                            setGiftRecipientId("");
+                            setGiftRevealDate(getTodayDateString());
+                          }
+                          setGiftRecipientMessage(`Sending ${selectedStoreGift.emoji} ${selectedStoreGift.name} celebration gift.`);
+                          setGiftPaymentMethod("momo");
+                        }}
+                        className="w-full h-10 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-[13px] rounded-lg cursor-pointer transition-colors shadow-xs flex items-center justify-center gap-1.5"
+                      >
+                        Send this gift →
+                      </button>
+                    </div>
+
+                    {/* Dot Indicators */}
+                    <div className="flex items-center justify-center gap-1.5 pt-2">
+                      {GIFT_INVENTORY.map((_, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => setGiftCarouselIndex(index)}
+                          className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                            index === giftCarouselIndex ? "w-5 bg-indigo-600" : "w-1.5 bg-slate-200 hover:bg-slate-300"
+                          }`}
+                          aria-label={`Go to slide ${index + 1}`}
+                        />
+                      ))}
+                    </div>
+                  </motion.div>
                 </div>
               )}
 
@@ -7828,7 +7410,7 @@ export default function App() {
                       >
                         <span>Received Gifts</span>
                         <span className="bg-slate-200 text-slate-700 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-                          {receivedGifts.length}
+                          {visibleReceivedGifts.length}
                         </span>
                       </button>
                     </div>
@@ -7893,7 +7475,7 @@ export default function App() {
                       </div>
                     )
                   ) : (
-                    receivedGifts.length === 0 ? (
+                    visibleReceivedGifts.length === 0 ? (
                       <div className="p-12 text-center border-2 border-dashed border-slate-200 bg-slate-50/50 rounded-2xl animate-fade-in">
                         <div className="text-4xl">🎁</div>
                         <h5 className="text-xs font-black text-zinc-700 mt-3">No Received Gifts Yet</h5>
@@ -7915,7 +7497,7 @@ export default function App() {
                             </tr>
                           </thead>
                           <tbody>
-                            {receivedGifts.map((gift) => (
+                            {visibleReceivedGifts.map((gift) => (
                               <tr key={gift.id} className="border-b border-slate-50 text-[11.5px] hover:bg-slate-50/50 transition">
                                 <td className="py-4 pl-2 font-black text-zinc-900 flex items-center gap-2 text-left">
                                   <span className="bg-rose-50 text-rose-700 font-bold px-2 py-0.5 rounded text-[10px] font-mono whitespace-nowrap">@received_sync</span>
@@ -8107,6 +7689,23 @@ export default function App() {
                             </span>
                           </div>
 
+                          {/* Secret Surprise Gift Toggle Option */}
+                          <div className="bg-[#FAF9F6] p-4 rounded-xl border border-slate-200 flex items-center justify-between">
+                            <div className="text-left space-y-0.5 pr-3">
+                              <span className="text-[10px] text-indigo-600 font-black uppercase tracking-wider block">Secret Surprise Milestone</span>
+                              <span className="text-xs font-black text-slate-900 block">Hide tracking until birthday</span>
+                              <p className="text-[9.5px] text-slate-400 font-bold leading-normal font-sans">
+                                Bypasses public stream and isolates tracking logic from peer view until celebration date!
+                              </p>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={giftIsSurprise}
+                              onChange={(e) => setGiftIsSurprise(e.target.checked)}
+                              className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600 cursor-pointer"
+                            />
+                          </div>
+
                           {/* Insufficient balance validation card */}
                           {walletBalance < (customGiftStoreItem.usdPrice * 12) && (
                             <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800 flex items-center gap-2 animate-pulse">
@@ -8157,7 +7756,8 @@ export default function App() {
                                   price: formattedPriceString,
                                   status: "Delivered",
                                   message: giftRecipientMessage.trim() || `Sent a lovely ${customGiftStoreItem.name}!`,
-                                  dateSent: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                                  dateSent: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+                                  isSurprise: giftIsSurprise
                                 };
 
                                 const updatedGifts = [newGiftLog, ...sentGifts];

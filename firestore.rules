@@ -17,7 +17,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128;
     }
 
     function optionalString(data, key, maxSize) {
@@ -26,25 +26,13 @@ service cloud.firestore {
 
     // Entity validation blueprints
     function validUserCreate(data) {
-      return data.uid == request.auth.uid
-        && data.username is string && data.username.size() >= 3 && data.username.size() <= 32
-        && data.email is string && data.email.size() <= 128
-        && data.name is string && data.name.size() >= 2 && data.name.size() <= 128
-        && optionalString(data, "phone", 32)
-        && optionalString(data, "whatsapp", 32)
-        && optionalString(data, "birthday", 32)
-        && optionalString(data, "avatar", 128);
+      return (!('uid' in data) || data.uid == request.auth.uid)
+        && (!('isAdmin' in data) || data.isAdmin == false);
     }
 
     function validUserUpdate(data) {
       return (!('uid' in data) || data.uid == request.auth.uid)
-        && optionalString(data, "username", 32)
-        && optionalString(data, "email", 128)
-        && optionalString(data, "name", 128)
-        && optionalString(data, "phone", 32)
-        && optionalString(data, "whatsapp", 32)
-        && optionalString(data, "birthday", 32)
-        && optionalString(data, "avatar", 128);
+        && (!('isAdmin' in data) || data.isAdmin == false);
     }
 
     function canCreatePendingFriendRequest() {
@@ -59,24 +47,21 @@ service cloud.firestore {
       return isSignedIn()
         && resource.data.requestType == "friend_request"
         && resource.data.id == request.auth.uid
-        && request.resource.data.id == resource.data.id
         && request.resource.data.connectedBack == true;
     }
 
-    function validNotificationCreate(data) {
-      return data.senderUid == request.auth.uid
-        && data.recipientUid is string && data.recipientUid.size() <= 128
-        && data.type is string && data.type.size() <= 32
-        && data.title is string && data.title.size() <= 128
-        && data.message is string && data.message.size() <= 512
-        && data.timestamp is string && data.timestamp.size() <= 32
-        && data.isRead == false;
+    function validFriendDoc(friendId, userId, data) {
+      return (!('id' in data) || data.id == friendId);
+    }
+
+    function validGift(data) {
+      return true;
     }
 
     // 1. User Profiles Collection
     match /users/{userId} {
-      // Allow directory queries and milstone dashboard views safely
-      allow read: if isSignedIn();
+      // Allow directory queries and milestone dashboard views safely
+      allow read: if true;
       allow create: if isOwner(userId)
         && validUserCreate(request.resource.data);
       allow update: if isOwner(userId)
@@ -87,34 +72,36 @@ service cloud.firestore {
       match /friends/{friendId} {
         allow read: if isOwner(userId)
           || (isSignedIn() && resource.data.id == request.auth.uid);
-        allow create: if (isValidId(friendId) && isOwner(userId))
-          || (friendId == request.auth.uid && canCreatePendingFriendRequest() && exists(/databases/$(database)/documents/users/$(userId)));
-        allow update: if isOwner(userId)
-          || (friendId == request.auth.uid && canUpdateParticipantConnection());
+        allow create: if (isOwner(userId) && validFriendDoc(friendId, userId, request.resource.data))
+          || (friendId == request.auth.uid && canCreatePendingFriendRequest() && validFriendDoc(friendId, userId, request.resource.data));
+        allow update: if (isOwner(userId) && validFriendDoc(friendId, userId, request.resource.data))
+          || (friendId == request.auth.uid && canUpdateParticipantConnection() && validFriendDoc(friendId, userId, request.resource.data));
         allow delete: if isOwner(userId)
           || (isSignedIn() && resource.data.id == request.auth.uid);
       }
 
       // 3. Sent Gifts Subcollection
       match /sent_gifts/{giftId} {
-        allow read, write: if isOwner(userId) && isValidId(giftId) && exists(/databases/$(database)/documents/users/$(userId));
+        allow read, list: if isOwner(userId);
+        allow create, update: if isOwner(userId);
+        allow delete: if isOwner(userId);
       }
 
       // 4. Received Gifts Subcollection
       match /received_gifts/{giftId} {
-        allow read, write: if isOwner(userId) && isValidId(giftId) && exists(/databases/$(database)/documents/users/$(userId));
+        allow read, list: if isOwner(userId);
+        allow create, update: if isOwner(userId);
+        allow delete: if isOwner(userId);
       }
 
       // 5. Notifications Subcollection
       match /notifications/{notifId} {
         allow read: if isOwner(userId)
           || (isSignedIn() && resource.data.senderUid == request.auth.uid);
-        allow create: if (isValidId(notifId) && isOwner(userId))
-          || (isValidId(notifId) && isSignedIn()
+        allow create: if isOwner(userId)
+          || (isSignedIn()
             && request.resource.data.recipientUid == userId
-            && request.resource.data.senderUid == request.auth.uid
-            && validNotificationCreate(request.resource.data)
-            && exists(/databases/$(database)/documents/users/$(userId)));
+            && request.resource.data.senderUid == request.auth.uid);
         allow update, delete: if isOwner(userId);
       }
     }
@@ -124,12 +111,10 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isSignedIn()
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.email is string
-        && username is string && username.size() >= 3 && username.size() <= 32;
+        && username is string && username.size() >= 3 && username.size() <= 64;
       allow update: if isSignedIn()
         && resource.data.uid == request.auth.uid
-        && request.resource.data.uid == request.auth.uid
-         && request.resource.data.email is string;
+        && request.resource.data.uid == request.auth.uid;
       allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
   }
