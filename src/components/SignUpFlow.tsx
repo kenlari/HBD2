@@ -5,7 +5,7 @@ import {
   Cake, Lock, Phone, Palette, Heart, Eye, EyeOff, CheckCircle2,
   Mail, ShieldCheck, Users, Calendar
 } from "lucide-react";
-import { auth, db } from "../firebase";
+import { auth, db, handleFirestoreError, OperationType } from "../firebase";
 import { 
   createUserWithEmailAndPassword, 
   sendEmailVerification,
@@ -1145,10 +1145,10 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
   }
 
   return (
-    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-5 relative overflow-y-auto">
+    <div className="w-full min-h-screen bg-[#FAFAFB] flex flex-col items-center justify-center p-6 relative overflow-y-auto font-sans">
       {/* Soft, warm colorful ambient radial glows */}
-      <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.15),transparent_60%)] pointer-events-none" />
-      <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(47,121,195,0.15),transparent_60%)] pointer-events-none" />
+      <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.04),transparent_60%)] pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.04),transparent_60%)] pointer-events-none" />
 
       <div className="w-full max-w-md mx-auto sm:max-w-xl lg:max-w-4xl px-4 z-10 flex flex-col gap-6">
 
@@ -1157,15 +1157,15 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
           <button
             type="button"
             onClick={() => step === 0 ? handleGoToLoginClean() : go(step - 1)}
-            className="w-9 h-9 rounded-xl bg-white hover:bg-slate-50 border border-[#E5E1D8] flex items-center justify-center text-slate-500 hover:text-slate-850 transition-all cursor-pointer shadow-sm"
+            className="w-9 h-9 rounded-xl bg-white hover:bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition-all cursor-pointer shadow-premium"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
 
           <StepDots current={step} total={TOTAL_STEPS} />
 
-          <div className="w-9 h-9 rounded-xl bg-white border border-[#E5E1D8] flex items-center justify-center shadow-sm">
-            <span className="text-xs font-black text-slate-400 font-mono">{step + 1}/{TOTAL_STEPS}</span>
+          <div className="w-9 h-9 rounded-xl bg-white border border-slate-100 flex items-center justify-center shadow-premium">
+            <span className="text-[10px] font-bold text-slate-400 font-mono">{step + 1}/{TOTAL_STEPS}</span>
           </div>
         </div>
 
@@ -1180,7 +1180,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
               animate="center"
               exit="exit"
               transition={transition}
-              className="bg-white border border-[#E5E1D8] rounded-3xl h-auto py-6 md:py-8 px-6 space-y-6 flex flex-col justify-between shadow-xl"
+              className="bg-white border border-slate-100 rounded-[2rem] h-auto py-7 px-6 space-y-6 flex flex-col justify-between shadow-premium"
             >
               {/* Step info context */}
               <div className="space-y-2">
@@ -1192,16 +1192,18 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
                 >
                   {current.emoji}
                 </motion.div>
-                <h2 className="text-2xl font-black text-[#0F172A] leading-tight tracking-tight text-left">
+                <h2 className="text-2xl font-display font-bold text-slate-900 leading-tight tracking-tight text-left">
                   {current.title}
                 </h2>
-                <p className="text-sm text-slate-500 leading-relaxed text-left font-medium">
+                <p className="text-xs text-slate-500 leading-relaxed text-left font-semibold">
                   {current.subtitle}
                 </p>
               </div>
 
               {/* Steps visual input component */}
-              {current.content}
+              <div className="text-slate-900">
+                {current.content}
+              </div>
 
               {/* CTA trigger controls */}
               <div className="flex gap-2 pt-1">
@@ -1209,10 +1211,10 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
                   type="button"
                   onClick={current.onNext}
                   disabled={!current.canNext || isCompleting}
-                  className={`flex-1 h-12 rounded-xl text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm ${
+                  className={`flex-1 h-11 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-premium ${
                     current.canNext && !isCompleting
-                      ? "bg-indigo-600 hover:bg-indigo-500 text-white active:scale-95"
-                      : "bg-slate-100 text-slate-350 cursor-not-allowed border border-slate-200"
+                      ? "bg-gradient-to-r from-indigo-500 to-purple-500 hover:brightness-105 text-white active:scale-[0.98]"
+                      : "bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-200"
                   }`}
                 >
                   {isCompleting ? (
@@ -1239,18 +1241,18 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white border border-[#E5E1D8] shadow-sm rounded-2xl px-4 py-3 flex items-center gap-3 max-w-md w-full mx-auto"
+            className="bg-white border border-slate-100 shadow-premium rounded-[1.5rem] px-4 py-3 flex items-center gap-3 max-w-md w-full mx-auto animate-fluid"
           >
             {avatar && (
-              <div className={`w-9 h-9 rounded-xl ${avatar} flex items-center justify-center text-white font-black text-sm shrink-0`}>
+              <div className={`w-9 h-9 rounded-xl ${avatar} flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm`}>
                 {name ? name.split(" ").map(n => n[0]).join("").slice(0, 2) : "?"}
               </div>
             )}
             <div className="min-w-0 text-left">
-              <p className="text-xs font-black text-slate-800 truncate">{name || "—"}</p>
-              {username && <p className="text-[10px] font-mono text-indigo-600 font-bold">@{username}</p>}
+              <p className="text-xs font-bold text-slate-800 truncate">{name || "—"}</p>
+              {username && <p className="text-[10px] font-mono text-indigo-500 font-bold">@{username}</p>}
             </div>
-            <div className="ml-auto flex items-center gap-1">
+            <div className="ml-auto flex items-center gap-1.5">
               {[name, username, email, birthday, rawPhone, password].filter(Boolean).map((_, i) => (
                 <div key={i} className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               ))}
@@ -1264,7 +1266,7 @@ export function SignUpFlow({ onComplete, onGoToLogin, triggerToast }: SignUpFlow
           <button
             type="button"
             onClick={handleGoToLoginClean}
-            className="text-indigo-600 font-bold hover:text-indigo-700 transition-colors cursor-pointer"
+            className="text-indigo-500 font-bold hover:text-indigo-600 transition-colors cursor-pointer"
           >
             Sign In
           </button>

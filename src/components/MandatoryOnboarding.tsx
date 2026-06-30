@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { User, AtSign, Cake, Phone, ShieldCheck, Check, ArrowRight, AlertTriangle, LogOut, Camera, Users, Search, HelpCircle } from "lucide-react";
-import { auth, db } from "../firebase";
+import { auth, db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { COUNTRIES } from "./SignUpFlow";
 import { signOut } from "firebase/auth";
@@ -259,6 +259,10 @@ export function MandatoryOnboarding({ userSession, onComplete, triggerToast }: M
       onComplete(finalProfile);
     } catch (err: any) {
       console.error("Onboarding final package save exception:", err);
+      if (err.code === "permission-denied" || err.message?.includes("permission-denied") || err.message?.includes("insufficient")) {
+        const currentAuthId = auth.currentUser?.uid || userSession.uid;
+        handleFirestoreError(err, OperationType.WRITE, `users/${currentAuthId}`);
+      }
       // Fallback to calling onComplete directly to avoid blocking access to the App during Firestore issues
       triggerToast("Setup Success ✅", "Bypassed sync to ensure instant app entry.");
       onComplete(finalProfile);

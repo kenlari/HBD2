@@ -1,9 +1,22 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter", sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+  
+  --shadow-premium: 0 4px 24px rgba(0, 0, 0, 0.02), 0 1px 4px rgba(0, 0, 0, 0.02);
+  --shadow-premium-lg: 0 16px 40px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.02);
+  --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.15);
+}
 
 html,
 body,
 #root {
   min-height: 100%;
+  font-family: var(--font-sans);
+  background-color: #FAFAFB;
 }
 
 #hbd-app-root {
@@ -15,6 +28,22 @@ body,
   overscroll-behavior-y: contain;
 }
 
+/* Custom premium scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #E5E7EB;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #D1D5DB;
+}
+
 @media (display-mode: standalone) {
   #hbd-app-root {
     height: 100dvh;
@@ -22,9 +51,9 @@ body,
   }
 }
 
-
 /* -------------------------------------------------------------
    GLOBAL THEMING ENHANCEMENT FOR CONSISTENT DARK/LIGHT VIEWS
+2026 UPDATE
 ------------------------------------------------------------- */
 
 /* Base Light and Dark Mode Rules */
@@ -39,101 +68,101 @@ html.dark {
 
 /* Core dark mode color theme overrides mapping */
 .dark body {
-  background-color: #0b0f19;
-  color: #f8fafc;
+  background-color: #090B11;
+  color: #F3F4F6;
 }
 
 /* Root app container viewport background color */
 .dark #hbd-app-root {
-  background-color: #0b0f19 !important;
-  color: #dfe4ec !important;
+  background-color: #090B11 !important;
+  color: #E5E7EB !important;
 }
 
 /* Sidebar header / sidebar footer adjustments to keep contrast elegant */
 .dark #sidebar-panel {
-  background-color: #080c14 !important;
-  border-color: #171f30 !important;
+  background-color: #0D0F16 !important;
+  border-color: #1F222F !important;
 }
 
 .dark #sidebar-panel button {
-  color: #94a3b8;
+  color: #9CA3AF;
 }
 
 .dark #sidebar-panel button:hover {
-  background-color: #1a2035/50 !important;
-  color: #ffffff !important;
+  background-color: rgba(31, 34, 47, 0.5) !important;
+  color: #FFFFFF !important;
 }
 
 /* Highlighting currently active sidebar layout link */
 .dark #sidebar-panel button.bg-indigo-600 {
-  background-color: #4f46e5 !important;
-  color: #ffffff !important;
+  background-color: #6366F1 !important;
+  color: #FFFFFF !important;
 }
 
 /* Header styling in dark mode */
 .dark #main-workspace-header {
-  background-color: #111827 !important; /* Slate-like background */
-  border-color: #1f2937 !important; /* Crisp divider matching dark panels */
-  color: #f8fafc !important;
+  background-color: #0E111A !important;
+  border-color: #1F222F !important;
+  color: #F3F4F6 !important;
 }
 
 .dark #main-workspace-header h2,
 .dark #main-workspace-header h1,
 .dark #main-workspace-header span,
 .dark #main-workspace-header p {
-  color: #f8fafc !important;
+  color: #F3F4F6 !important;
 }
 
 .dark #main-workspace-header .text-slate-400 {
-  color: #94a3b8 !important;
+  color: #9CA3AF !important;
 }
 
 /* Soft inline informational state tag in the header */
 .dark #main-workspace-header .bg-\[\#FAF9FF\] {
-  background-color: #1e293b !important;
-  border-color: #334155 !important;
-  color: #cbd5e1 !important;
+  background-color: #1F222F !important;
+  border-color: #2D3142 !important;
+  color: #D1D5DB !important;
 }
 
 /* Cards, blocks, panels, interactive containers */
 .dark .bg-white {
-  background-color: #151d30 !important; /* Elevated elegant dark slate card */
-  border-color: #232d45 !important;
-  color: #f8fafc !important;
+  background-color: #111422 !important; /* Elevated elegant dark slate card */
+  border-color: #1F222F !important;
+  color: #F3F4F6 !important;
 }
 
 .dark .bg-slate-50 {
-  background-color: #0f172a !important; /* deep canvas base background */
+  background-color: #090B11 !important; /* deep canvas base background */
 }
 
 .dark .bg-slate-100 {
-  background-color: #1e293b !important;
-  border-color: #2e3c54 !important;
-  color: #f1f5f9 !important;
+  background-color: #1F222F !important;
+  border-color: #2D3142 !important;
+  color: #F3F4F6 !important;
 }
 
 .dark .bg-indigo-50 {
   background-color: rgba(99, 102, 241, 0.12) !important;
   border-color: rgba(99, 102, 241, 0.3) !important;
-  color: #a5b4fc !important;
+  color: #A5B4FC !important;
 }
 
 .dark .text-indigo-600,
 .dark .text-indigo-700 {
-  color: #818cf8 !important;
+  color: #818CF8 !important;
 }
 
 /* Soft grey backgrounds in buttons, alerts, state controls */
 .dark .hover\:bg-slate-50:hover {
-  background-color: #182235 !important;
+  background-color: #171B2D !important;
 }
 
 .dark .hover\:bg-slate-100:hover {
-  background-color: #1f293d !important;
+  background-color: #1F243A !important;
 }
 
 .dark .hover\:bg-slate-200:hover {
-  background-color: #28354f !important;
+  background-color: #262E49 !important;
 }
 
 /* Ensure all primary headers, details, lists match high readability */
@@ -143,7 +172,7 @@ html.dark {
 .dark .text-slate-700,
 .dark .text-zinc-800,
 .dark .text-zinc-900 {
-  color: #f1f5f9 !important;
+  color: #F3F4F6 !important;
 }
 
 .dark .text-slate-650,
@@ -151,12 +180,12 @@ html.dark {
 .dark .text-slate-500,
 .dark .text-zinc-600,
 .dark .text-zinc-700 {
-  color: #cbd5e1 !important; /* highly eligible light secondary */
+  color: #D1D5DB !important;
 }
 
 .dark .text-slate-400,
 .dark .text-zinc-400 {
-  color: #94a3b8 !important; /* clean silver text label style */
+  color: #9CA3AF !important;
 }
 
 /* Divider blocks & border styles */
@@ -169,7 +198,7 @@ html.dark {
 .dark .border-rose-100,
 .dark .border-slate-205,
 .dark .border-slate-350 {
-  border-color: #232d45 !important;
+  border-color: #1F222F !important;
 }
 
 /* Form fields input tags and interactive controls styling */
@@ -178,29 +207,29 @@ html.dark {
 .dark input[type="date"],
 .dark select,
 .dark textarea {
-  background-color: #0b0f19 !important;
-  color: #f8fafc !important;
-  border-color: #232d45 !important;
+  background-color: #090B11 !important;
+  color: #F3F4F6 !important;
+  border-color: #1F222F !important;
 }
 
 .dark input[type="text"]::placeholder,
 .dark textarea::placeholder {
-  color: #64748b !important;
+  color: #4B5563 !important;
 }
 
 .dark select option {
-  background-color: #151d30 !important;
-  color: #f8fafc !important;
+  background-color: #111422 !important;
+  color: #F3F4F6 !important;
 }
 
 /* Quick utility alerts panel overlay and lists */
 .dark #my-profile-banner {
-  background-color: #111827 !important;
-  border-color: #232d45 !important;
+  background-color: #0E111A !important;
+  border-color: #1F222F !important;
 }
 
 .dark #profile-subtab-settings-deck div.bg-slate-50 {
-  background-color: #151d30 !important;
+  background-color: #111422 !important;
 }
 
 /* Modal window styling matching high dark aesthetic */
@@ -209,32 +238,32 @@ html.dark {
 }
 
 .dark .fixed.inset-0.z-50 .bg-white {
-  background-color: #111827 !important;
-  border-color: #232d45 !important;
+  background-color: #0E111A !important;
+  border-color: #1F222F !important;
 }
 
 .dark .fixed.inset-0 b,
 .dark .fixed.inset-0 p,
 .dark .fixed.inset-0 span {
-  color: #f8fafc;
+  color: #F3F4F6;
 }
 
 /* Keep the interactive charts readable */
 .dark .recharts-cartesian-grid-horizontal line,
 .dark .recharts-cartesian-grid-vertical line {
-  stroke: #232d45 !important;
+  stroke: #1F222F !important;
 }
 
 .dark .recharts-text {
-  fill: #94a3b8 !important;
+  fill: #9CA3AF !important;
 }
 
 .dark .recharts-legend-item-text {
-  color: #f1f5f9 !important;
+  color: #F3F4F6 !important;
 }
 
 .dark .recharts-default-tooltip {
-  background-color: #151d30 !important;
-  border-color: #232d45 !important;
-  color: #f8fafc !important;
+  background-color: #111422 !important;
+  border-color: #1F222F !important;
+  color: #F3F4F6 !important;
 }

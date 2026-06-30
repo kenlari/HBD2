@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sparkles, X, Mail, Lock, Eye, EyeOff, Cake, User, Phone, ArrowLeft, ArrowRight, ShieldAlert } from "lucide-react";
-import { auth, db, signInWithGoogle } from "../firebase";
+import { auth, db, signInWithGoogle, handleFirestoreError, OperationType } from "../firebase";
 import { getRedirectResult, signInWithEmailAndPassword, sendPasswordResetEmail, type User as FirebaseUser } from "firebase/auth";
 import { doc, getDoc, setDoc, query, collection, where, getDocs } from "firebase/firestore";
 import { COUNTRIES } from "./SignUpFlow";
@@ -174,6 +174,9 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
       }
     } catch (err: any) {
       console.warn("Google credentials initialization fallback active:", err);
+      if (err.code === "permission-denied" || err.message?.includes("permission-denied") || err.message?.includes("insufficient")) {
+        handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+      }
       showProfileFallback(firebaseUser);
     }
   };
@@ -373,6 +376,9 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
       }
     } catch (err: any) {
       console.error("Firebase Auth credential mismatch: ", err);
+      if (err.code === "permission-denied" || err.message?.includes("permission-denied") || err.message?.includes("insufficient")) {
+        handleFirestoreError(err, OperationType.GET, `users/${auth.currentUser?.uid}`);
+      }
       let friendly = "Oops! That password doesn't match our records. Please try again.";
       
       const errMsg = err.message || "";
@@ -517,6 +523,9 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
       triggerToast("Onboarding Completed! 🚀", `Welcome to HBD Loop, ${profile.name}!`);
     } catch (err: any) {
       console.error("Onboarding failed:", err);
+      if (err.code === "permission-denied" || err.message?.includes("permission-denied") || err.message?.includes("insufficient")) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${pendingUser.uid}`);
+      }
       triggerToast("Configuration Fail ❌", "Failed to compile your HBD database. Try again.");
     } finally {
       setFallbackSubmitting(false);
@@ -526,58 +535,60 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
   // If in Setup fallback, render beautiful custom wizard profiles
   if (showProfileSetupFallback && pendingUser) {
     return (
-      <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-4 relative overflow-y-auto text-slate-900" id="hbd-onboarding-fallback-root">
-        {/* Colorful backgrounds */}
-        <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.06),transparent_55%)] pointer-events-none" />
-        <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(124,58,237,0.06),transparent_55%)] pointer-events-none" />
+      <div className="w-full min-h-screen bg-[#FAFAFB] flex flex-col items-center justify-center p-6 relative overflow-y-auto text-slate-900 font-sans" id="hbd-onboarding-fallback-root">
+        {/* Soft elegant ambient blobs */}
+        <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.05),transparent_55%)] pointer-events-none" />
+        <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.05),transparent_55%)] pointer-events-none" />
         
         <div className="w-full max-w-sm mx-auto z-10 space-y-6">
           <div className="text-center space-y-3 flex flex-col items-center">
-            {/* Geometric Loop Logo */}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" className="w-12 h-12 block" fill="none">
-              <rect x="12" y="15" width="14" height="70" rx="7" fill="url(#hbdLoopOnbFallback)" />
-              <rect x="74" y="15" width="14" height="70" rx="7" fill="url(#hbdLoopOnbFallback)" />
-              <path d="M 19,50 C 30,15 40,85 50,50 C 60,15 70,85 81,50 C 70,15 60,85 50,50 C 40,15 30,85 19,50 Z" fill="none" stroke="url(#hbdLoopOnbFallback)" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" />
-              <defs>
-                <linearGradient id="hbdLoopOnbFallback" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#FF4D00" />
-                  <stop offset="100%" stopColor="#7C3AED" />
-                </linearGradient>
-              </defs>
-            </svg>
+            {/* Elegant Double-Loop Logo */}
+            <div className="p-3 bg-white rounded-3xl border border-slate-100 shadow-premium">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" className="w-10 h-10 block" fill="none">
+                <rect x="12" y="15" width="14" height="70" rx="7" fill="url(#hbdLoopOnbFallback)" />
+                <rect x="74" y="15" width="14" height="70" rx="7" fill="url(#hbdLoopOnbFallback)" />
+                <path d="M 19,50 C 30,15 40,85 50,50 C 60,15 70,85 81,50 C 70,15 60,85 50,50 C 40,15 30,85 19,50 Z" fill="none" stroke="url(#hbdLoopOnbFallback)" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" />
+                <defs>
+                  <linearGradient id="hbdLoopOnbFallback" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#6366F1" />
+                    <stop offset="100%" stopColor="#A855F7" />
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
             <div className="text-center">
-              <h2 className="text-lg font-black text-slate-800 tracking-tight">Finalize Account</h2>
-              <p className="text-[11px] text-slate-500 font-bold tracking-wider uppercase">HBD Onboarding Block</p>
+              <h2 className="text-xl font-display font-bold text-[#111827] tracking-tight">Finalize Account</h2>
+              <p className="text-[10px] text-slate-400 font-bold tracking-wider uppercase">Onboarding Parameters</p>
             </div>
           </div>
 
           <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white border border-[#E5E1D8] rounded-[2.2rem] p-5 shadow-xl space-y-5 text-left"
+            className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-premium space-y-5 text-left"
           >
             <form onSubmit={handleFallbackSubmit} className="space-y-4">
               {/* Name */}
               <div>
-                <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-600 mb-1">Full Name</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 pl-1">Full Name</label>
                 <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="text"
                     required
                     value={fallbackName}
                     onChange={(e) => setFallbackName(e.target.value)}
                     placeholder="e.g. Alex Johnson"
-                    className="w-full bg-white text-slate-900 font-medium placeholder-slate-400 border border-[#E5E1D8] focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-9 pr-3 py-3 text-xs transition-all"
+                    className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white text-slate-900 font-medium placeholder-slate-400 border border-slate-200 focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] outline-none rounded-xl pl-10 pr-3 py-3 text-xs transition-all"
                   />
                 </div>
               </div>
 
               {/* Username */}
               <div>
-                <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-600 mb-1">Choose Handle</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 pl-1">Choose Handle</label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-600 font-black text-xs select-none">@</span>
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-indigo-500 font-bold text-xs select-none">@</span>
                   <input
                     type="text"
                     required
@@ -587,37 +598,37 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                       setFallbackUsernameError("");
                     }}
                     placeholder="username_handle"
-                    className={`w-full bg-white text-slate-900 font-medium placeholder-slate-400 border ${fallbackUsernameError ? 'border-rose-500' : 'border-[#E5E1D8]'} focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-7 pr-3 py-3 text-xs transition-all font-mono`}
+                    className={`w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white text-slate-900 font-medium placeholder-slate-400 border ${fallbackUsernameError ? 'border-rose-500' : 'border-slate-200'} focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] outline-none rounded-xl pl-7 pr-3 py-3 text-xs transition-all font-mono`}
                   />
                 </div>
                 {fallbackUsernameError && (
-                  <p className="text-[10px] text-rose-600 mt-1 font-bold">{fallbackUsernameError}</p>
+                  <p className="text-[10px] text-rose-500 mt-1.5 font-medium pl-1">{fallbackUsernameError}</p>
                 )}
               </div>
 
               {/* Birthday */}
               <div>
-                <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-600 mb-1">Your Birthday</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 pl-1">Your Birthday</label>
                 <div className="relative">
-                  <Cake className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Cake className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="date"
                     required
                     value={fallbackBirthday}
                     onChange={(e) => setFallbackBirthday(e.target.value)}
-                    className="w-full bg-white text-slate-900 font-medium placeholder-slate-400 border border-[#E5E1D8] focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-9 pr-3 py-3 text-xs cursor-pointer transition-all"
+                    className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white text-slate-900 font-medium placeholder-slate-400 border border-slate-200 focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] outline-none rounded-xl pl-10 pr-3 py-3 text-xs cursor-pointer transition-all"
                   />
                 </div>
               </div>
 
               {/* Phone with dial code */}
               <div>
-                <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-600 mb-1">Mobile Details</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 pl-1">Mobile Details</label>
                 <div className="flex gap-1.5">
                   <select
                     value={fallbackCountryCode}
                     onChange={(e) => setFallbackCountryCode(e.target.value)}
-                    className="bg-[#FAF9F6] border border-[#E5E1D8] text-slate-800 rounded-xl px-2 py-3 text-xs outline-none focus:border-indigo-600 cursor-pointer text-center font-bold"
+                    className="bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-2.5 py-3 text-xs outline-none focus:border-indigo-500 cursor-pointer text-center font-semibold"
                   >
                     {COUNTRIES.map((c) => (
                       <option key={c.code} value={c.code}>
@@ -636,12 +647,12 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                         setFallbackPhoneError("");
                       }}
                       placeholder="e.g. 541234567"
-                      className={`w-full bg-white text-slate-900 font-medium placeholder-slate-400 border ${fallbackPhoneError ? 'border-rose-500' : 'border-[#E5E1D8]'} focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-9 pr-3 py-3 text-xs transition-all font-mono`}
+                      className={`w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white text-slate-900 font-medium placeholder-slate-400 border ${fallbackPhoneError ? 'border-rose-500' : 'border-slate-200'} focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] outline-none rounded-xl pl-10 pr-3 py-3 text-xs transition-all font-mono`}
                     />
                   </div>
                 </div>
                 {fallbackPhoneError && (
-                  <p className="text-[10px] text-rose-600 mt-1 font-bold">{fallbackPhoneError}</p>
+                  <p className="text-[10px] text-rose-500 mt-1.5 font-medium pl-1">{fallbackPhoneError}</p>
                 )}
               </div>
 
@@ -649,7 +660,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
               <button
                 type="submit"
                 disabled={fallbackSubmitting}
-                className="w-full h-11 bg-gradient-to-r from-[#FF4D00] to-[#7C3AED] hover:brightness-110 disabled:brightness-75 text-white text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md"
+                className="w-full h-11 bg-gradient-to-r from-indigo-500 to-purple-500 hover:brightness-105 active:scale-[0.98] disabled:brightness-75 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-premium"
               >
                 {fallbackSubmitting ? (
                   <>
@@ -668,7 +679,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                   setPendingUser(null);
                   auth.signOut();
                 }}
-                className="w-full h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs py-2 rounded-xl text-center font-bold transition-all active:scale-[0.98] cursor-pointer"
+                className="w-full h-10 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs py-2 rounded-xl text-center font-semibold transition-all active:scale-[0.98] cursor-pointer"
               >
                 Sign Out / Start Over
               </button>
@@ -680,10 +691,10 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
   }
 
   return (
-    <div className="w-full min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-between p-6 relative overflow-y-auto font-sans text-slate-900" id="hbd-login-page-root">
-      {/* Soft overlay elements */}
-      <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.06),transparent_55%)] pointer-events-none" />
-      <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(124,58,237,0.06),transparent_55%)] pointer-events-none" />
+    <div className="w-full min-h-screen bg-[#FAFAFB] flex flex-col items-center justify-between p-6 relative overflow-y-auto font-sans text-slate-900" id="hbd-login-page-root">
+      {/* Soft gradient ambient overlay elements */}
+      <div className="absolute top-0 left-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.05),transparent_55%)] pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-[50%] h-[50%] bg-[radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.05),transparent_55%)] pointer-events-none" />
       
       {/* Top Margin Anchor */}
       <div className="h-4" />
@@ -697,7 +708,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 300, damping: 20 }}
-            className="p-2 bg-white rounded-full border-2 border-slate-300 shadow-xl cursor-default flex items-center justify-center ring-4 ring-slate-100/60"
+            className="p-3 bg-white rounded-3xl border border-slate-100 shadow-premium cursor-default flex items-center justify-center"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" className="w-14 h-14 block" fill="none">
               <rect x="12" y="15" width="14" height="70" rx="7" fill="url(#hbdLandingLogoMain)" />
@@ -705,17 +716,17 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
               <path d="M 19,50 C 30,15 40,85 50,50 C 60,15 70,85 81,50 C 70,15 60,85 50,50 C 40,15 30,85 19,50 Z" fill="none" stroke="url(#hbdLandingLogoMain)" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" />
               <defs>
                 <linearGradient id="hbdLandingLogoMain" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#FF4D00" />
-                  <stop offset="100%" stopColor="#7C3AED" />
+                  <stop offset="0%" stopColor="#6366F1" />
+                  <stop offset="100%" stopColor="#A855F7" />
                 </linearGradient>
               </defs>
             </svg>
           </motion.div>
 
           <div className="space-y-1">
-            <h1 className="text-3xl font-sans">
-              <span className="text-slate-900 font-black tracking-tight">HBD </span>
-              <span className="text-[#FF4D00] font-black tracking-tight">LOOP</span>
+            <h1 className="text-3xl font-display font-extrabold tracking-tight">
+              <span className="text-slate-900">HBD </span>
+              <span className="text-indigo-600">LOOP</span>
             </h1>
             {/* Dynamic Typing animated effect */}
             <TypingEffect />
@@ -744,7 +755,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                 <button
                   type="button"
                   onClick={() => setSubState("signin_step1")}
-                  className="w-full h-13 min-h-[48px] bg-gradient-to-r from-[#FF4D00] to-[#7C3AED] hover:brightness-110 disabled:brightness-75 text-white font-black text-sm rounded-[1.8rem] flex items-center justify-center transition-all duration-200 active:scale-95 cursor-pointer shadow-md select-none border border-transparent"
+                  className="w-full h-12 bg-gradient-to-r from-indigo-500 to-purple-500 hover:brightness-105 text-white font-bold text-xs rounded-xl flex items-center justify-center transition-all duration-200 active:scale-[0.98] cursor-pointer shadow-premium select-none border border-transparent"
                 >
                   Sign In
                 </button>
@@ -753,7 +764,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                 <button
                   type="button"
                   onClick={onGoToSignUp}
-                  className="w-full h-13 min-h-[48px] bg-transparent hover:bg-slate-100 text-slate-800 font-extrabold text-sm rounded-[1.8rem] flex items-center justify-center border-2 border-slate-350 transition-all duration-200 active:scale-95 cursor-pointer select-none"
+                  className="w-full h-12 bg-transparent hover:bg-slate-50 text-slate-800 font-semibold text-xs rounded-xl flex items-center justify-center border border-slate-200 transition-all duration-200 active:scale-[0.98] cursor-pointer select-none"
                 >
                   Sign Up
                 </button>
@@ -772,22 +783,22 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -50 }}
               transition={{ type: "spring", stiffness: 350, damping: 30 }}
-              className="bg-white border border-[#E5E1D8] rounded-[2.2rem] p-6 shadow-xl space-y-4"
+              className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-premium space-y-4"
             >
               <div className="flex items-center justify-between">
                 <button
                   type="button"
                   onClick={() => setSubState("landing")}
-                  className="w-9 h-9 rounded-full bg-[#FAF9F6] border border-[#E5E1D8] flex items-center justify-center text-slate-800 hover:text-slate-900 transition-colors"
+                  className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-colors"
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
-                <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest font-mono">Step 1 of 2</span>
+                <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest font-mono">Step 1 of 2</span>
               </div>
 
-              <div className="text-left space-y-1 font-sans">
-                <h3 className="font-extrabold text-base text-[#0F172A]">Verify Account</h3>
-                <p className="text-xs text-slate-800 leading-normal font-medium">
+              <div className="text-left space-y-1">
+                <h3 className="font-display font-bold text-base text-slate-900">Verify Account</h3>
+                <p className="text-xs text-slate-500 leading-normal font-medium">
                   Enter your email, phone, or username to get started.
                 </p>
               </div>
@@ -795,18 +806,18 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
               {/* Gentle Error Notice Banner with bottom right Create Account link */}
               {validationError && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-left relative">
-                  <div className="flex items-center gap-1.5 text-amber-900 font-extrabold text-xs mb-1">
+                  <div className="flex items-center gap-1.5 text-amber-900 font-bold text-xs mb-1">
                     <ShieldAlert className="w-4 h-4 text-amber-600" />
                     <span>Quick Security Check</span>
                   </div>
-                  <p className="text-xs text-amber-900 font-bold leading-relaxed pr-1.5">
+                  <p className="text-xs text-amber-900 font-semibold leading-relaxed pr-1.5">
                     {validationError}
                   </p>
                   <div className="text-right mt-3">
                     <button
                       type="button"
                       onClick={onGoToSignUp}
-                      className="text-xs font-black text-indigo-600 hover:text-indigo-700 hover:underline transition"
+                      className="text-xs font-bold text-indigo-500 hover:text-indigo-600 hover:underline transition"
                     >
                       Create Account &rarr;
                     </button>
@@ -816,11 +827,11 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
 
               <form onSubmit={handleVerifyIdentifier} className="space-y-4 text-left">
                 <div>
-                  <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-800 mb-1.5 px-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 px-1">
                     Email, Username, or Phone Number
                   </label>
                   <div className="relative">
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-450" />
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                       type="text"
                       required
@@ -831,7 +842,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                         setValidationError(null);
                       }}
                       placeholder="name@example.com or @handle"
-                      className="w-full bg-white text-slate-900 font-medium placeholder-slate-400 border border-[#E5E1D8] focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-10 pr-3 py-3.5 text-xs transition-all"
+                      className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white text-slate-900 font-medium placeholder-slate-400 border border-slate-200 focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] outline-none rounded-xl pl-10 pr-3 py-3 text-xs transition-all animate-fluid"
                     />
                   </div>
                 </div>
@@ -839,7 +850,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                 <button
                   type="submit"
                   disabled={isLoading || !emailOrUsername.trim()}
-                  className="w-full h-12 bg-gradient-to-r from-[#FF4D00] to-[#7C3AED] hover:brightness-110 disabled:brightness-75 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                  className="w-full h-11 bg-gradient-to-r from-indigo-500 to-purple-500 hover:brightness-105 active:scale-[0.98] disabled:brightness-75 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-premium"
                 >
                   {isLoading ? (
                     <>
@@ -867,7 +878,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -50 }}
               transition={{ type: "spring", stiffness: 350, damping: 30 }}
-              className="bg-white border border-[#E5E1D8] rounded-[2.2rem] p-6 shadow-xl space-y-4 animate-fluid"
+              className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-premium space-y-4 animate-fluid"
             >
               <div className="flex items-center justify-between">
                 <button
@@ -876,16 +887,16 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                     setValidationError(null);
                     setSubState("signin_step1");
                   }}
-                  className="w-9 h-9 rounded-full bg-[#FAF9F6] border border-[#E5E1D8] flex items-center justify-center text-slate-800 hover:text-slate-950 transition-colors"
+                  className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-colors"
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
-                <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest font-mono">Step 2 of 2</span>
+                <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest font-mono">Step 2 of 2</span>
               </div>
 
-              <div className="text-left space-y-1">
-                <h3 className="font-extrabold text-base text-[#0F172A]">Enter Password</h3>
-                <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg text-[10px] font-semibold break-all inline-block truncate max-w-full">
+              <div className="text-left space-y-1.5">
+                <h3 className="font-display font-bold text-base text-slate-900">Enter Password</h3>
+                <span className="bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-[10px] font-semibold break-all inline-block truncate max-w-full">
                   Verified ID: {verifiedEmail}
                 </span>
               </div>
@@ -893,11 +904,11 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
               {/* Error Notice Block */}
               {validationError && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-left">
-                  <div className="flex items-center gap-1.5 text-amber-900 font-extrabold text-xs mb-1">
+                  <div className="flex items-center gap-1.5 text-amber-900 font-bold text-xs mb-1">
                     <ShieldAlert className="w-4 h-4 text-amber-600" />
                     <span>Quick Security Check</span>
                   </div>
-                  <p className="text-xs text-amber-900 font-bold leading-relaxed">
+                  <p className="text-xs text-amber-900 font-semibold leading-relaxed">
                     {validationError}
                   </p>
                 </div>
@@ -905,18 +916,18 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
 
               {/* Password sent message */}
               {resetNotice && (
-                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] p-3.5 rounded-2xl text-center font-bold">
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] p-3 rounded-xl text-center font-semibold">
                   ✉️ {resetNotice}
                 </div>
               )}
 
               <form onSubmit={handlePasswordSubmit} className="space-y-4 text-left">
                 <div>
-                  <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-800 mb-1.5 px-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 px-1">
                     Password Code
                   </label>
                   <div className="relative">
-                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400" />
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                       type={showPassword ? "text" : "password"}
                       required
@@ -927,12 +938,12 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                         setValidationError(null);
                       }}
                       placeholder="Your secret passcode"
-                      className="w-full bg-white text-slate-900 font-medium placeholder-slate-400 border border-[#E5E1D8] focus:border-[#FF4D00] focus:ring-1 focus:ring-[#FF4D00] outline-none rounded-xl pl-10 pr-10 py-3.5 text-xs transition-all"
+                      className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white text-slate-900 font-medium placeholder-slate-400 border border-slate-200 focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] outline-none rounded-xl pl-10 pr-10 py-3 text-xs transition-all font-mono"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-450 hover:text-slate-650"
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                       tabIndex={-1}
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -945,7 +956,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                       type="button"
                       onClick={handlePasswordResetDirect}
                       disabled={isForgotPasswordLoading}
-                      className="text-xs text-indigo-600 hover:text-indigo-805 hover:underline font-extrabold transition"
+                      className="text-xs text-indigo-500 hover:text-indigo-600 font-bold transition"
                     >
                       {isForgotPasswordLoading ? "Dispatched..." : "Forgot Password?"}
                     </button>
@@ -955,7 +966,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                 <button
                   type="submit"
                   disabled={submittingPassword || !password.trim()}
-                  className="w-full h-12 bg-gradient-to-r from-[#FF4D00] to-[#7C3AED] hover:brightness-110 disabled:brightness-75 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                  className="w-full h-11 bg-gradient-to-r from-indigo-500 to-purple-500 hover:brightness-105 active:scale-[0.98] disabled:brightness-75 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-premium"
                 >
                   {submittingPassword ? (
                     <>
@@ -977,16 +988,16 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-indigo-50 border border-indigo-100 rounded-3xl p-4 text-left space-y-3 mt-4"
+            className="bg-indigo-50/50 border border-indigo-100 rounded-[1.5rem] p-4 text-left space-y-3 mt-4 shadow-premium"
           >
-            <div className="flex items-center gap-2 text-indigo-700 font-extrabold text-[11px]">
+            <div className="flex items-center gap-2 text-indigo-600 font-bold text-[10px] uppercase tracking-wider">
               <span>🔑</span>
               <span>Authorization Settings Required</span>
             </div>
             <p className="text-[10.5px] text-indigo-900 leading-relaxed">
               Add this sandbox address to your Authorized domains inside Firebase console:
             </p>
-            <div className="bg-white border border-[#E5E1D8] p-2.5 rounded-xl flex items-center justify-between font-mono text-[9px] text-indigo-700">
+            <div className="bg-white border border-slate-100 p-2.5 rounded-xl flex items-center justify-between font-mono text-[9px] text-indigo-600">
               <span>{unauthorizedDomainError}</span>
               <button
                 type="button"
@@ -994,7 +1005,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
                   navigator.clipboard.writeText(unauthorizedDomainError);
                   triggerToast("Copied! 📋", "Domain address clipboard copy.");
                 }}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-2 py-0.5 rounded text-[8px]"
+                className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold px-2.5 py-1 rounded-lg text-[9px] transition"
               >
                 Copy
               </button>
@@ -1005,12 +1016,12 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
       </div>
 
       {/* 3. FOOTER LAYER (Minimal Continue with Google at bottom of viewport) */}
-      <div className="w-full max-w-sm mx-auto text-center space-y-3 pb-4 z-10">
+      <div className="w-full max-w-sm mx-auto text-center space-y-4 pb-4 z-10">
         <button
           type="button"
           onClick={handleGoogleSignIn}
           disabled={isLoading}
-          className="w-full h-12 bg-white hover:bg-[#FAF9F6] text-slate-800 border-2 border-[#E5E1D8] font-black text-xs rounded-xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] cursor-pointer shadow-sm min-h-[44px]"
+          className="w-full h-11 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 font-semibold text-xs rounded-xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] cursor-pointer shadow-premium min-h-[44px]"
         >
           <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
@@ -1021,7 +1032,7 @@ export function LoginPage({ onLogin, onGoToSignUp, triggerToast }: LoginPageProp
           <span className="font-bold">Continue with Google</span>
         </button>
 
-        <p className="text-[10px] text-slate-800 font-extrabold tracking-widest uppercase">
+        <p className="text-[9px] text-slate-400 font-bold tracking-widest uppercase">
           Track Birthdays · AI Gift Ideas · Secure Wishlists
         </p>
       </div>

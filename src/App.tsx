@@ -4,7 +4,7 @@ import { INITIAL_FRIENDS, ALL_ACHIEVEMENTS_LIST } from "./data";
 import { Friend, WishlistItem, Achievement, GiftSuggestion, InAppNotification, SentGift, ReceivedGift, WishlistFeedItem } from "./types";
 import { MOCK_EXTERNAL_PROFILES, MockProfile } from "./mockProfiles";
 import { QrScanner } from "./components/QrScanner";
-import { auth, db } from "./firebase";
+import { auth, db, handleFirestoreError, OperationType } from "./firebase";
 import { onAuthStateChanged, signOut, sendPasswordResetEmail } from "firebase/auth";
 import { collection, doc, setDoc, deleteDoc, getDoc, onSnapshot, query, limit as firestoreLimit, where, getDocs, serverTimestamp } from "firebase/firestore";
 import { 
@@ -81,13 +81,22 @@ interface StoreGiftItem {
 
 const GIFT_INVENTORY: StoreGiftItem[] = [
   {
+    id: "letter_handwritten",
+    name: "Handwritten Letter",
+    type: "card",
+    emoji: "✍️",
+    usdPrice: 1.25,
+    category: "Classic Token",
+    description: "A personal touch that means everything."
+  },
+  {
     id: "rose_regular",
     name: "Premium Red Rose",
     type: "rose",
     emoji: "🌹",
-    usdPrice: 5,
+    usdPrice: 4.17,
     category: "Classic Token",
-    description: "A single hand-picked dark crimson velvet rose. Expresses timeless elegance, affection, and personal dedication."
+    description: "Express love with this classic favorite."
   },
   {
     id: "bouquet_luxe",
@@ -96,7 +105,7 @@ const GIFT_INVENTORY: StoreGiftItem[] = [
     emoji: "💐",
     usdPrice: 25,
     category: "Deluxe Floral",
-    description: "A luxurious wrapped arrangement of tulips, crimson baby-breath, and orchids. Perfect as a gorgeous, high-class surprise statement."
+    description: "A luxurious wrapped arrangement of tulips, crimson baby-breath, and orchids. Perfect as a surprise statement."
   },
   {
     id: "cake_deluxe",
@@ -105,16 +114,16 @@ const GIFT_INVENTORY: StoreGiftItem[] = [
     emoji: "🎂",
     usdPrice: 15,
     category: "Gourmet Confection",
-    description: "A fresh multi-layered vanilla buttercream frosting cake with decorative candles, sparkles, and direct interactive wishes."
+    description: "A fresh multi-layered vanilla buttercream frosting cake with decorative candles and sparkles."
   },
   {
     id: "chocolate_artisan",
-    name: "Artisan Chocolate Box",
+    name: "Chocolate Box",
     type: "chocolate",
     emoji: "🍫",
-    usdPrice: 12,
+    usdPrice: 6.67,
     category: "Gourmet Sweet",
-    description: "A handcrafted collection of imported Belgian dark and milk chocolate pralines wrapped in a sleek satin ribbon presentation."
+    description: "Sweet moments made better."
   },
   {
     id: "champagne_celebration",
@@ -155,49 +164,76 @@ const GIFT_INVENTORY: StoreGiftItem[] = [
 ];
 
 const BrandTypingLogo = () => {
-  const fullText = "HBD LOOP";
-  const [displayedText, setDisplayedText] = useState("");
-  const [cursorVisible, setCursorVisible] = useState(true);
-  const [typingComplete, setTypingComplete] = useState(false);
-
-  useEffect(() => {
-    let index = 0;
-    const interval = setInterval(() => {
-      if (index < fullText.length) {
-        setDisplayedText((prev) => prev + fullText[index]);
-        index++;
-      } else {
-        clearInterval(interval);
-        setTypingComplete(true);
-        // Fade out cursor after completion
-        setTimeout(() => {
-          setCursorVisible(false);
-        }, 600);
-      }
-    }, 120); // 120ms per letter: 8 letters * 120ms = ~960ms total typing time
-
-    return () => clearInterval(interval);
-  }, []);
-
   return (
-    <div className="flex items-center justify-center font-sans">
-      <h1 className="text-3xl md:text-4xl lg:text-5xl font-black tracking-tight select-none">
-        <span className="text-slate-900">
-          {displayedText.substring(0, Math.min(displayedText.length, 4))}
-        </span>
-        {displayedText.length > 4 && (
-          <span className="text-[#FF4D00]">
-            {displayedText.substring(4)}
-          </span>
-        )}
-        <span 
-          className={`ml-1 text-slate-400 font-light transition-opacity duration-300 ${
-            cursorVisible ? "opacity-100" : "opacity-0"
-          } ${!typingComplete ? "animate-pulse" : ""}`}
+    <div className="flex flex-col items-center justify-center space-y-6">
+      {/* Centered logo container with soft glow */}
+      <div className="relative flex items-center justify-center">
+        {/* Soft glowing ambient circle behind the logo */}
+        <motion.div
+          animate={{
+            scale: [1, 1.12, 1],
+            opacity: [0.25, 0.45, 0.25],
+          }}
+          transition={{
+            duration: 2.5,
+            repeat: Infinity,
+            ease: "easeInOut",
+          }}
+          className="absolute w-36 h-36 bg-gradient-to-tr from-indigo-500 via-purple-400 to-orange-400 rounded-full blur-3xl opacity-30 pointer-events-none animate-pulse"
+        />
+        
+        {/* Pulsing Logo Card */}
+        <motion.div
+          animate={{
+            scale: [0.97, 1.03, 0.97],
+          }}
+          transition={{
+            duration: 2,
+            repeat: Infinity,
+            ease: "easeInOut",
+          }}
+          className="relative z-10 p-5 bg-white/80 backdrop-blur-xl rounded-[2rem] shadow-[0_12px_40px_rgba(0,0,0,0.03)] border border-white/60"
         >
-          |
-        </span>
-      </h1>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" className="w-16 h-16 block" fill="none">
+            <rect x="12" y="15" width="14" height="70" rx="7" fill="url(#hbdSplashLogoGrad)" />
+            <rect x="74" y="15" width="14" height="70" rx="7" fill="url(#hbdSplashLogoGrad)" />
+            <path d="M 19,50 C 30,15 40,85 50,50 C 60,15 70,85 81,50 C 70,15 60,85 50,50 C 40,15 30,85 19,50 Z" fill="none" stroke="url(#hbdSplashLogoGrad)" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" />
+            <defs>
+              <linearGradient id="hbdSplashLogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#6366F1" />
+                <stop offset="50%" stopColor="#A855F7" />
+                <stop offset="100%" stopColor="#F97316" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </motion.div>
+      </div>
+
+      {/* Brand Name with letter spacing */}
+      <div className="text-center space-y-2.5">
+        <h1 className="text-2xl font-display font-extrabold tracking-[0.22em] text-slate-900 uppercase pl-[0.22em]">
+          HBD Loop
+        </h1>
+        
+        {/* Small animated loading indicator */}
+        <div className="flex items-center justify-center gap-1.5 pt-0.5">
+          <motion.div
+            animate={{ scale: [1, 1.4, 1], opacity: [0.3, 1, 0.3] }}
+            transition={{ duration: 1, repeat: Infinity, delay: 0 }}
+            className="w-1.5 h-1.5 rounded-full bg-[#6366F1]"
+          />
+          <motion.div
+            animate={{ scale: [1, 1.4, 1], opacity: [0.3, 1, 0.3] }}
+            transition={{ duration: 1, repeat: Infinity, delay: 0.15 }}
+            className="w-1.5 h-1.5 rounded-full bg-[#A855F7]"
+          />
+          <motion.div
+            animate={{ scale: [1, 1.4, 1], opacity: [0.3, 1, 0.3] }}
+            transition={{ duration: 1, repeat: Infinity, delay: 0.3 }}
+            className="w-1.5 h-1.5 rounded-full bg-[#F97316]"
+          />
+        </div>
+      </div>
     </div>
   );
 };
@@ -224,11 +260,11 @@ export default function App() {
   useEffect(() => {
     const fadeTimer = setTimeout(() => {
       setSplashFadeOut(true);
-    }, 2000);
+    }, 1300);
 
     const unmountTimer = setTimeout(() => {
       setSplashVisible(false);
-    }, 2600);
+    }, 1800);
 
     return () => {
       clearTimeout(fadeTimer);
@@ -530,6 +566,7 @@ export default function App() {
 
   // --- IN-APP GIFT STORE MANAGEMENT STATES ---
   const [giftStoreTab, setGiftStoreTab] = useState<"gallery" | "pools" | "ledger">("gallery");
+  const [galleryCategory, setGalleryCategory] = useState<"foryou" | "popular" | "premium">("foryou");
   const [giftCarouselIndex, setGiftCarouselIndex] = useState<number>(0);
   const [giftSwipeStartX, setGiftSwipeStartX] = useState<number | null>(null);
   const [giftContributionAmount, setGiftContributionAmount] = useState<string>("50");
@@ -1598,6 +1635,7 @@ export default function App() {
       },
       (error) => {
         console.warn("[Registry Listener] Firestore snapshot reading denied or unauthenticated:", error.message || error);
+        handleFirestoreError(error, OperationType.LIST, "users");
       }
     );
 
@@ -1626,6 +1664,7 @@ export default function App() {
       },
       (error) => {
         console.warn("[Friends Listener] Firestore subscription denied or unauthenticated:", error.message || error);
+        handleFirestoreError(error, OperationType.LIST, `users/${userSession.uid}/friends`);
       }
     );
 
@@ -1643,6 +1682,7 @@ export default function App() {
       },
       (error) => {
         console.warn("[Gifts Listener] Firestore subscription denied or unauthenticated:", error.message || error);
+        handleFirestoreError(error, OperationType.LIST, `users/${userSession.uid}/sent_gifts`);
       }
     );
 
@@ -1662,6 +1702,7 @@ export default function App() {
       },
       (error) => {
         console.warn("[Received Gifts Listener] Firestore subscription denied or unauthenticated:", error.message || error);
+        handleFirestoreError(error, OperationType.LIST, `users/${userSession.uid}/received_gifts`);
       }
     );
 
@@ -1679,6 +1720,7 @@ export default function App() {
       },
       (error) => {
         console.warn("[Notifications Listener] Firestore subscription denied or unauthenticated:", error.message || error);
+        handleFirestoreError(error, OperationType.LIST, `users/${userSession.uid}/notifications`);
       }
     );
 
@@ -1712,6 +1754,7 @@ export default function App() {
       },
       (error) => {
         console.warn("[UserDoc Listener] Firestore subscription denied or unauthenticated:", error.message || error);
+        handleFirestoreError(error, OperationType.GET, `users/${userSession.uid}`);
       }
     );
 
@@ -3610,8 +3653,20 @@ export default function App() {
                 userName={userSession ? userSession.name : "Alex Patel"}
                 onViewFriend={(friendId) => {
                   setSelectedFriendId(friendId);
+                  setViewingBuddyProfile(true);
                   setActiveSection("registry");
+                  window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
+                onNavigate={(section, subTab) => {
+                  setActiveSection(section as any);
+                  if (subTab) {
+                    if (section === "registry") setRegistrySubTab(subTab as any);
+                    if (section === "gift-store") setGiftStoreTab(subTab as any);
+                    if (section === "profile") setProfileSubTab(subTab as any);
+                  }
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                logs={logs}
               />
 
               {/* Top Greeting Message */}
@@ -4431,20 +4486,20 @@ export default function App() {
           {activeSection === "registry" && (
             <div className="space-y-6 text-left" id="view-registry-hull">
               {/* Clean Buddies Card Header */}
-              <div className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 text-left">
-                <h3 className="text-[15px] font-semibold text-slate-900">Buddies</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">Manage your friends and celebration loops</p>
+              <div className="bg-white rounded-2xl border border-neutral-100/40 p-4 text-left">
+                <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Buddies</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-normal">Manage your friends and celebration loops</p>
               </div>
 
-              {/* Clean 3-tab bar: 36px tall, 3 equal sections, 13px font, underline indicator on active tab */}
-              <div className="flex border-b border-slate-200 h-9 w-full" id="registry-segmented-tabs">
+              {/* Clean 3-tab bar: beautiful, evenly balanced horizontal text-switcher bar */}
+              <div className="flex border-b border-neutral-100/40 w-full" id="registry-segmented-tabs">
                 <button
                   type="button"
                   onClick={() => setRegistrySubTab("list")}
-                  className={`flex-1 h-full text-[13px] font-semibold transition-all cursor-pointer relative flex items-center justify-center ${
+                  className={`flex-1 text-center py-2 text-xs transition-all cursor-pointer relative ${
                     registrySubTab === "list"
-                      ? "text-indigo-600 border-b-2 border-indigo-600"
-                      : "text-slate-500 hover:text-slate-800"
+                      ? "font-semibold text-slate-900 border-b-2 border-[#FF4D00]"
+                      : "font-normal text-slate-400 hover:text-slate-600"
                   }`}
                 >
                   Friends
@@ -4453,10 +4508,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setRegistrySubTab("connect")}
-                  className={`flex-1 h-full text-[13px] font-semibold transition-all cursor-pointer relative flex items-center justify-center ${
+                  className={`flex-1 text-center py-2 text-xs transition-all cursor-pointer relative ${
                     registrySubTab === "connect"
-                      ? "text-indigo-600 border-b-2 border-indigo-600"
-                      : "text-slate-500 hover:text-slate-800"
+                      ? "font-semibold text-slate-900 border-b-2 border-[#FF4D00]"
+                      : "font-normal text-slate-400 hover:text-slate-600"
                   }`}
                 >
                   Add
@@ -4465,17 +4520,17 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setRegistrySubTab("requests")}
-                  className={`flex-1 h-full text-[13px] font-semibold transition-all cursor-pointer relative flex items-center justify-center gap-1.5 ${
+                  className={`flex-1 text-center py-2 text-xs transition-all cursor-pointer relative flex items-center justify-center gap-1.5 ${
                     registrySubTab === "requests"
-                      ? "text-indigo-600 border-b-2 border-indigo-600"
-                      : "text-slate-500 hover:text-slate-800"
+                      ? "font-semibold text-slate-900 border-b-2 border-[#FF4D00]"
+                      : "font-normal text-slate-400 hover:text-slate-600"
                   }`}
                 >
                   <span>Requests</span>
                   {(() => {
                     const count = friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length;
                     return count > 0 ? (
-                      <span className="w-4 h-4 bg-rose-600 text-white text-[10px] font-semibold rounded-full flex items-center justify-center">
+                      <span className="px-1.5 py-0.5 bg-rose-500 text-white text-[9px] font-semibold rounded-full flex items-center justify-center shrink-0">
                         {count}
                       </span>
                     ) : null;
@@ -4512,18 +4567,18 @@ export default function App() {
                                       setSelectedFriendId(friend.id);
                                       setViewingBuddyProfile(true);
                                     }}
-                                    className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+                                    className="bg-white rounded-xl border border-neutral-100/40 p-2.5 flex items-center justify-between cursor-pointer hover:bg-slate-50/50 transition-colors"
                                   >
                                     <div className="flex items-center gap-2.5 truncate">
-                                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-[11px] text-white shrink-0 ${friend.avatar || "bg-rose-500"}`}>
+                                      <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[9px] text-white shrink-0 ${friend.avatar || "bg-rose-500"}`}>
                                         {initials}
                                       </div>
-                                      <div className="truncate">
-                                        <p className="text-[13px] font-semibold text-slate-900 truncate">{friend.name}</p>
-                                        <p className="text-[11px] text-slate-400 truncate">@{friend.id}</p>
+                                      <div className="truncate text-left">
+                                        <p className="text-xs font-semibold text-slate-900 truncate leading-tight">{friend.name}</p>
+                                        <p className="text-[10px] text-slate-400 truncate mt-0.5">@{friend.id}</p>
                                       </div>
                                     </div>
-                                    <span className="text-[11px] font-semibold text-indigo-600 font-mono shrink-0">
+                                    <span className="text-[10px] font-semibold text-[#FF4D00] font-mono shrink-0">
                                       {days === 0 ? "Today! 🎉" : `in ${days}d`}
                                     </span>
                                   </div>
@@ -4545,7 +4600,7 @@ export default function App() {
                             placeholder="Search by username..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full h-9 bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 text-[13px] outline-none focus:border-indigo-600 focus:bg-white transition-colors"
+                            className="w-full h-9 bg-slate-50/50 border border-slate-200 rounded-xl pl-9 pr-3 text-xs outline-none focus:border-[#FF4D00]/50 focus:bg-white transition-colors"
                           />
                         </div>
 
@@ -4559,22 +4614,22 @@ export default function App() {
                               { name: "Julian Alcaraz", phone: "+34 600-123456", initials: "JA" },
                               { name: "Amara Diop", phone: "+221 77-512-3456", initials: "AD" }
                             ].filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).map((contact, idx) => (
-                              <div key={idx} className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 flex items-center justify-between">
+                              <div key={idx} className="bg-white rounded-xl border border-neutral-100/40 p-2.5 flex items-center justify-between">
                                 <div className="flex items-center gap-2.5 truncate">
-                                  <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold flex items-center justify-center shrink-0">
+                                  <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 text-[9px] font-bold flex items-center justify-center shrink-0">
                                     {contact.initials}
                                   </div>
-                                  <div className="truncate">
-                                    <p className="text-[13px] font-semibold text-slate-900 truncate">{contact.name}</p>
-                                    <p className="text-[11px] font-mono text-slate-400">{contact.phone}</p>
+                                  <div className="truncate text-left">
+                                    <p className="text-xs font-semibold text-slate-900 truncate leading-tight">{contact.name}</p>
+                                    <p className="text-[10px] font-mono text-slate-400 mt-0.5">{contact.phone}</p>
                                   </div>
                                 </div>
                                 <button
                                   type="button"
                                   onClick={() => triggerToast("Invitation Sent", `SMS invite sent to ${contact.name}`)}
-                                  className="h-8 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-semibold rounded-lg transition-colors cursor-pointer shrink-0"
+                                  className="h-6 px-2 text-[10px] font-semibold text-[#FF4D00] hover:text-[#e04400] bg-transparent cursor-pointer shrink-0 transition-colors"
                                 >
-                                  Add
+                                  Invite
                                 </button>
                               </div>
                             ))}
@@ -4607,28 +4662,29 @@ export default function App() {
                                   <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Incoming Requests</h4>
                                   <div className="flex flex-col gap-2">
                                     {incoming.map(f => (
-                                      <div key={f.id} className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 flex items-center justify-between">
+                                      <div key={f.id} className="bg-white rounded-xl border border-neutral-100/40 p-2.5 flex items-center justify-between">
                                         <div className="flex items-center gap-2.5 truncate">
-                                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-[11px] text-white shrink-0 ${f.avatar || "bg-indigo-600"}`}>
+                                          <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[9px] text-white shrink-0 ${f.avatar || "bg-[#FF4D00]"}`}>
                                             {f.name.split(" ").map(n => n[0] || "").join("").toUpperCase()}
                                           </div>
-                                          <div className="truncate">
-                                            <p className="text-[13px] font-semibold text-slate-900 truncate">{f.name}</p>
-                                            <p className="text-[11px] text-slate-400 truncate">@{f.id}</p>
+                                          <div className="truncate text-left">
+                                            <p className="text-xs font-semibold text-slate-900 truncate leading-tight">{f.name}</p>
+                                            <p className="text-[10px] text-slate-400 truncate mt-0.5">@{f.id}</p>
                                           </div>
                                         </div>
-                                        <div className="flex items-center gap-1.5 shrink-0">
+                                        <div className="flex items-center gap-2 shrink-0">
                                           <button
                                             type="button"
                                             onClick={() => handleAcceptFriendRequest(f)}
-                                            className="h-8 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-semibold rounded-lg cursor-pointer transition-colors"
+                                            className="text-xs font-semibold text-[#FF4D00] hover:text-[#e04400] transition-colors cursor-pointer"
                                           >
                                             Accept
                                           </button>
+                                          <span className="text-neutral-200">|</span>
                                           <button
                                             type="button"
                                             onClick={() => handleDeclineFriendRequest(f)}
-                                            className="h-8 px-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-semibold rounded-lg cursor-pointer transition-colors"
+                                            className="text-xs font-semibold text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
                                           >
                                             Decline
                                           </button>
@@ -4644,17 +4700,17 @@ export default function App() {
                                   <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Outgoing Requests</h4>
                                   <div className="flex flex-col gap-2">
                                     {outgoing.map(f => (
-                                      <div key={f.id} className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 flex items-center justify-between">
+                                      <div key={f.id} className="bg-white rounded-xl border border-neutral-100/40 p-2.5 flex items-center justify-between">
                                         <div className="flex items-center gap-2.5 truncate">
-                                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-[11px] text-white shrink-0 ${f.avatar || "bg-slate-500"}`}>
+                                          <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[9px] text-white shrink-0 ${f.avatar || "bg-slate-500"}`}>
                                             {f.name.split(" ").map(n => n[0] || "").join("").toUpperCase()}
                                           </div>
-                                          <div className="truncate">
-                                            <p className="text-[13px] font-semibold text-slate-900 truncate">{f.name}</p>
-                                            <p className="text-[11px] text-slate-400 truncate">Pending acceptance</p>
+                                          <div className="truncate text-left">
+                                            <p className="text-xs font-semibold text-slate-900 truncate leading-tight">{f.name}</p>
+                                            <p className="text-[10px] text-slate-400 truncate mt-0.5">Pending acceptance</p>
                                           </div>
                                         </div>
-                                        <span className="text-[11px] font-semibold text-slate-400 shrink-0">Sent</span>
+                                        <span className="text-[10px] font-semibold text-slate-400 shrink-0">Sent</span>
                                       </div>
                                     ))}
                                   </div>
@@ -4666,14 +4722,6 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                            Invite to Loop
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </div>
               {/* Right Companion Detail cockpit area (SPAN 7) */}
               <div className={viewingBuddyProfile ? "fixed inset-0 bg-white z-50 overflow-y-auto p-6" : "hidden"}>
                 <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-6 md:p-8 space-y-6">
@@ -5748,59 +5796,106 @@ export default function App() {
                   </div>
                 )}
               </div>
-
             </div>
           )}
-
-
-          {/* Screens 4, 5, and 6 are beautifully integrated and consolidated as interactive subsections inside the redone unified My Profile tab view */}
-
-          {/* ==================== SCREEN 7: MY PROFILE & WORKSPACE SETTINGS ==================== */}
-          {activeSection === "profile" && (
+                      {activeSection === "profile" && (
             <div className="space-y-6 text-left" id="view-signin-custom-hull">
               
-              {/* Introduction Banner */}
-              <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 rounded-3xl text-left text-white shadow-xl relative overflow-hidden">
-                <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-radial from-indigo-500/10 to-transparent pointer-events-none" />
+              {/* Immersive Premium Profile Header Card (Gradient & Glassmorphism Stats) */}
+              <div className="bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 rounded-[2.5rem] p-6 text-left relative overflow-hidden shadow-premium">
+                {/* Clean glass action buttons */}
+                <div className="absolute right-6 top-6 flex items-center gap-2 z-20">
+                  <button
+                    type="button"
+                    onClick={() => setIsDarkMode(prev => !prev)}
+                    className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-white/10 text-white hover:bg-white/20 transition cursor-pointer"
+                    title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                  >
+                    {isDarkMode ? (
+                      <Sun className="w-4 h-4 text-amber-300" />
+                    ) : (
+                      <Moon className="w-4 h-4" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsProfileSettingsOpen(true)}
+                    className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-white/10 text-white hover:bg-white/20 transition cursor-pointer"
+                    title="Open profile settings"
+                  >
+                    <Settings className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Avatar and name info */}
+                <div className="flex items-center gap-4 relative z-10">
+                  <div className="w-16 h-16 rounded-full bg-white/25 border-2 border-white text-white flex items-center justify-center font-display font-extrabold text-lg shadow-sm">
+                    {userSession ? userSession.name[0]?.toUpperCase() : "A"}
+                  </div>
+                  <div className="space-y-0.5">
+                    <h3 className="text-base font-bold text-white font-display leading-tight">
+                      {userSession ? userSession.name : "Alex Patel"}
+                    </h3>
+                    <span className="text-xs text-white/80 font-semibold block leading-none">
+                      @{userSession ? userSession.username : "alex_patel"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Glassmorphic Stats Row */}
+                <div className="grid grid-cols-3 gap-2 pt-5 border-t border-white/10 mt-5 text-center relative z-10">
+                  <div className="text-white">
+                    <span className="block text-sm font-black text-white">{friends.filter(f => f.id !== "alex").length}</span>
+                    <span className="block text-[9.5px] text-white/70 font-semibold uppercase tracking-wider mt-0.5">Buddies</span>
+                  </div>
+                  <div className="text-white border-x border-white/10">
+                    <span className="block text-sm font-black text-white">{sentGifts.length}</span>
+                    <span className="block text-[9.5px] text-white/70 font-semibold uppercase tracking-wider mt-0.5">Gifts Sent</span>
+                  </div>
+                  <div className="text-white">
+                    <span className="block text-sm font-black text-white">{friends.filter(f => f.birthday && f.id !== "alex").length}</span>
+                    <span className="block text-[9.5px] text-white/70 font-semibold uppercase tracking-wider mt-0.5">Birthdays</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Clean beautiful horizontal text-switcher bar */}
+              <div className="flex border-b border-neutral-100/40 w-full" id="profile-segmented-tabs">
                 <button
-  type="button"
-  onClick={() => setIsDarkMode(prev => !prev)}
-  className="absolute right-16 top-4 inline-flex items-center justify-center h-10 w-10 rounded-2xl bg-white/10 text-white hover:bg-white/20 border border-white/20 transition"
-  title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
->
-  {isDarkMode ? (
-    <Sun className="w-5 h-5 text-amber-400" />
-  ) : (
-    <Moon className="w-5 h-5" />
-  )}
-</button>
+                  type="button"
+                  onClick={() => setProfileSubTab("profile")}
+                  className={`flex-1 text-center py-2 text-xs transition-all cursor-pointer relative ${
+                    profileSubTab === "profile"
+                      ? "font-semibold text-slate-900 border-b-2 border-[#FF4D00]"
+                      : "font-normal text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  My Profile
+                </button>
 
                 <button
                   type="button"
-                  onClick={() => setIsProfileSettingsOpen(true)}
-                  className="absolute right-4 top-4 inline-flex items-center justify-center h-10 w-10 rounded-2xl bg-white/10 text-white hover:bg-white/20 border border-white/20 transition"
-                  title="Open profile settings"
+                  onClick={() => setProfileSubTab("wishlist")}
+                  className={`flex-1 text-center py-2 text-xs transition-all cursor-pointer relative ${
+                    profileSubTab === "wishlist"
+                      ? "font-semibold text-slate-900 border-b-2 border-[#FF4D00]"
+                      : "font-normal text-slate-400 hover:text-slate-600"
+                  }`}
                 >
-                  <Settings className="w-5 h-5" />
+                  My Wishlist
                 </button>
-                <h3 className="text-xl md:text-2xl font-black text-white flex items-center gap-2">
-                  <User className="w-5 h-5 text-indigo-400" />
-                  <span>My Profile</span>
-                </h3>
-                <p className="text-xs text-indigo-200 mt-1.5 leading-relaxed max-w-2xl font-sans">
-                  A single page for your account info, wishlist items, widget preview, and trophies.
-                </p>
-              </div>
 
-              <div className="flex bg-slate-100 p-1 rounded-2xl gap-1 border border-slate-200">
-                <button onClick={() => setProfileSubTab("profile")} className={`flex-1 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${profileSubTab === "profile" ? "bg-white text-slate-900 shadow-md" : "text-slate-500 hover:text-slate-900"}`}>
-                  <User className="w-3.5 h-3.5" /><span>My Profile</span>
-                </button>
-                <button onClick={() => setProfileSubTab("wishlist")} className={`flex-1 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${profileSubTab === "wishlist" ? "bg-white text-slate-900 shadow-md" : "text-slate-500 hover:text-slate-900"}`}>
-                  <Heart className="w-3.5 h-3.5" /><span>My Wishlist</span>
-                </button>
-                <button onClick={() => setProfileSubTab("trophies")} className={`flex-1 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${profileSubTab === "trophies" ? "bg-white text-slate-900 shadow-md" : "text-slate-500 hover:text-slate-900"}`}>
-                  <Award className="w-3.5 h-3.5" /><span>Trophies</span>
+                <button
+                  type="button"
+                  onClick={() => setProfileSubTab("trophies")}
+                  className={`flex-1 text-center py-2 text-xs transition-all cursor-pointer relative ${
+                    profileSubTab === "trophies"
+                      ? "font-semibold text-slate-900 border-b-2 border-[#FF4D00]"
+                      : "font-normal text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  Trophies
                 </button>
               </div>
 
@@ -6235,14 +6330,14 @@ export default function App() {
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
                 
                 {/* COLUMN 1: Active user session configuration form (Span 6) */}
-                <div className="lg:col-span-6 bg-white rounded-[2rem] border border-slate-200 p-6 shadow-xs flex flex-col justify-between">
+                <div className="lg:col-span-6 bg-white rounded-2xl border border-neutral-100/40 p-4 flex flex-col justify-between">
                   <div className="space-y-4">
                     <div>
-                      <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
-                        <Sliders className="w-4.5 h-4.5 text-indigo-600" />
+                      <h4 className="font-semibold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-[#FF4D00]" />
                         <span>Edit Profile</span>
                       </h4>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
+                      <p className="text-[11px] text-slate-400 mt-0.5 leading-normal">
                         Keep your name, username, birthday, and contact info up to date.
                       </p>
                     </div>
@@ -6289,80 +6384,80 @@ export default function App() {
                       className="space-y-3.5 text-left"
                     >
                       <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Full Name</label>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Full Name</label>
                         <input
                           type="text"
                           required
                           value={signInName}
                           onChange={(e) => setSignInName(e.target.value)}
                           placeholder="e.g. Alex Patel"
-                          className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full bg-slate-50/50 border border-slate-200/60 text-slate-800 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-[#FF4D00]/50 transition-colors"
                         />
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 font-sans">Username</label>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 font-sans">Username</label>
                           <input
                             type="text"
                             required
                             value={signInUsername}
                             onChange={(e) => setSignInUsername(e.target.value)}
                             placeholder="e.g. alex_snap"
-                            className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none focus:border-indigo-500 transition-colors font-mono"
+                            className="w-full bg-slate-50/50 border border-slate-200/60 text-slate-800 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-[#FF4D00]/50 transition-colors font-mono"
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Your Birthday</label>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Your Birthday</label>
                           <input
                             type="date"
                             required
                             value={signInBirthday}
                             onChange={(e) => setSignInBirthday(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3.5 py-1.5 text-xs font-semibold outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                            className="w-full bg-slate-50/50 border border-slate-200/60 text-slate-800 rounded-xl px-3 py-1 text-xs outline-none focus:border-[#FF4D00]/50 transition-colors cursor-pointer"
                           />
                         </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 font-sans">Phone Number</label>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 font-sans">Phone Number</label>
                           <input
                             type="text"
                             required
                             value={signInPhone}
                             onChange={(e) => setSignInPhone(e.target.value)}
                             placeholder="e.g. +233241234567"
-                            className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none focus:border-indigo-500 transition-colors font-mono"
+                            className="w-full bg-slate-50/50 border border-slate-200/60 text-slate-800 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-[#FF4D00]/50 transition-colors font-mono"
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 font-sans">WhatsApp Number</label>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 font-sans">WhatsApp Number</label>
                           <input
                             type="text"
                             required
                             value={signInWhatsApp}
                             onChange={(e) => setSignInWhatsApp(e.target.value)}
                             placeholder="e.g. +233241234567"
-                            className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none focus:border-indigo-500 transition-colors font-mono"
+                            className="w-full bg-slate-50/50 border border-slate-200/60 text-slate-800 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-[#FF4D00]/50 transition-colors font-mono"
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 font-sans">Email Address</label>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 font-sans">Email Address</label>
                           <input
                             type="email"
                             required
                             value={signInEmail}
                             onChange={(e) => setSignInEmail(e.target.value)}
                             placeholder="e.g. alex@example.com"
-                            className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none focus:border-indigo-500 transition-colors font-mono"
+                            className="w-full bg-slate-50/50 border border-slate-200/60 text-slate-800 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-[#FF4D00]/50 transition-colors font-mono"
                           />
                         </div>
                       </div>
 
                       {/* Avatar Palette Selection */}
                       <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Favorite Avatar Accent</label>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Favorite Avatar Accent</label>
                         <div className="flex gap-2">
                           {[
                             { bg: "bg-teal-500", name: "Teal" },
@@ -6370,14 +6465,14 @@ export default function App() {
                             { bg: "bg-amber-500", name: "Amber" },
                             { bg: "bg-rose-500", name: "Rose" },
                             { bg: "bg-emerald-500", name: "Emerald" },
-                            { bg: "bg-pink-500", name: "Plum" }
+                            { bg: "bg-purple-500", name: "Purple" }
                           ].map(pal => (
                             <button
                               key={pal.bg}
                               type="button"
                               onClick={() => setSignInAvatar(pal.bg)}
                               className={`w-7 h-7 rounded-lg transition-transform hover:scale-110 flex items-center justify-center cursor-pointer relative ${pal.bg} ${
-                                signInAvatar === pal.bg ? "ring-2 ring-indigo-600 ring-offset-2 ring-offset-white scale-105" : "opacity-75"
+                                signInAvatar === pal.bg ? "ring-2 ring-indigo-500 ring-offset-2 ring-offset-white scale-105" : "opacity-75"
                               }`}
                               title={pal.name}
                             >
@@ -6389,7 +6484,7 @@ export default function App() {
 
                       {/* Dynamic Interests Choice Box */}
                       <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Select Main Interest Niches</label>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Select Main Interest Niches</label>
                         <div className="flex flex-wrap gap-1.5 font-sans">
                           {[
                             "Photography", "Specialty Coffee", "Cyberpunk Novels", "Mechanic Keyboards",
@@ -6407,10 +6502,10 @@ export default function App() {
                                     setSignInInterests(prev => [...prev, tag]);
                                   }
                                 }}
-                                className={`px-2 py-1.5 rounded-lg text-[9px] font-bold font-sans tracking-tight transition-colors cursor-pointer border ${
+                                className={`px-2 py-1 rounded-lg text-[9px] font-bold font-sans tracking-tight transition-colors cursor-pointer border ${
                                   isChosen 
-                                    ? "bg-indigo-50 text-indigo-600 border-indigo-200 font-extrabold" 
-                                    : "bg-slate-50 text-slate-500 border-slate-200 hover:text-slate-800"
+                                    ? "bg-indigo-50 text-indigo-600 border-indigo-100 font-bold" 
+                                    : "bg-slate-50/50 text-slate-400 border-slate-100 hover:text-slate-600"
                                 }`}
                               >
                                 {tag}
@@ -6422,7 +6517,7 @@ export default function App() {
 
                       <button
                         type="submit"
-                        className="w-full text-center bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white py-3 rounded-2xl font-black text-xs transition-all shadow-xl shadow-indigo-150 tracking-wide cursor-pointer flex items-center justify-center gap-1.5"
+                        className="w-full text-center bg-gradient-to-r from-indigo-500 to-purple-500 hover:brightness-105 active:scale-[0.98] text-white py-2 rounded-xl font-bold text-xs transition-all tracking-wide cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
                       >
                         <CheckCheck className="w-4 h-4" />
                         <span>Update Workspace Session</span>
@@ -6430,36 +6525,32 @@ export default function App() {
                     </form>
 
                     {/* HBD Digital Member QR Pass Card */}
-                    <div className="mt-6 border-t border-slate-150 pt-5 space-y-3 text-left">
+                    <div className="mt-6 border-t border-slate-100 pt-4 space-y-3 text-left">
                       <div className="flex items-center gap-1.5">
-                        <span className="p-1 px-2 bg-indigo-50 text-indigo-600 rounded-lg font-black text-[9px] tracking-wide uppercase">QR Handshake System</span>
-                        <h5 className="font-extrabold text-[12px] text-slate-800">My Handshake Profile QR Pass</h5>
+                        <span className="p-1 px-1.5 bg-indigo-50/50 text-indigo-600 rounded font-bold text-[9px] tracking-wide uppercase">QR Handshake System</span>
+                        <h5 className="font-semibold text-xs text-slate-900">My Handshake Profile QR Pass</h5>
                       </div>
                       
-                      <div className="bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-[1.5rem] p-4.5 relative overflow-hidden shadow-sm flex flex-col sm:flex-row items-center gap-4.5 border border-indigo-950/40">
-                        {/* Interactive backdrop glows */}
-                        <div className="absolute -right-12 -top-12 w-28 h-28 rounded-full bg-indigo-550/20 blur-2xl pointer-events-none" />
-                        <div className="absolute -left-12 -bottom-12 w-28 h-28 rounded-full bg-teal-550/10 blur-2xl pointer-events-none" />
-                        
-                        <div className="bg-white p-2 rounded-xl shrink-0 shadow-md">
+                      <div className="bg-[#FAFAFB] text-slate-800 rounded-3xl p-4 relative overflow-hidden flex flex-col sm:flex-row items-center gap-4 border border-slate-100 shadow-premium">
+                        <div className="bg-white p-1.5 rounded-2xl shrink-0 border border-slate-100 shadow-sm">
                           <img 
                             src={getProfileQrUrl(115)}
                             alt="Your HBD Loop Profile QR Code Pass"
-                            className="w-[100px] h-[100px] block"
+                            className="w-[90px] h-[90px] block"
                             referrerPolicy="no-referrer"
                           />
                         </div>
 
-                        <div className="text-center sm:text-left space-y-1.5 min-w-0 flex-1">
+                        <div className="text-center sm:text-left space-y-1 min-w-0 flex-1">
                           <div className="flex items-center gap-1.5 justify-center sm:justify-start">
-                            <span className="text-[8.5px] uppercase font-bold text-indigo-400 tracking-wider font-mono">My Digital Pass</span>
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                            <span className="text-[8.5px] uppercase font-bold text-indigo-500 tracking-wider font-mono">My Digital Pass</span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
                           </div>
                           <div>
-                            <span className="text-sm font-black text-slate-100 block truncate">{userSession ? userSession.name : "Alex Patel"}</span>
-                            <span className="text-[11px] font-mono text-emerald-400 font-bold block">@{userSession ? userSession.username : "alex_patel"}</span>
+                            <span className="text-sm font-bold text-slate-900 block truncate">{userSession ? userSession.name : "Alex Patel"}</span>
+                            <span className="text-[11px] font-mono text-slate-500 font-bold block">@{userSession ? userSession.username : "alex_patel"}</span>
                           </div>
-                          <p className="text-[10px] text-slate-350 leading-relaxed max-w-sm">
+                          <p className="text-[10px] text-slate-400 leading-normal max-w-sm">
                             Show this profile QR to other HBD users. Scanning it sends a pending buddy request.
                           </p>
                         </div>
@@ -6475,37 +6566,37 @@ export default function App() {
               {activeSection === "profile" && profileSubTab === "wishlist" && (
                 <div className="space-y-6 animate-fade-in" id="profile-subtab-wishlist">
                   {/* User profile details ribbon */}
-                  <div className="bg-white rounded-[2rem] border border-slate-200 p-6 md:p-8 flex flex-col md:flex-row justify-between items-stretch gap-6 shadow-xs text-left" id="my-profile-banner">
-                    <div className="flex gap-4 items-center">
-                      <div className="w-14 h-14 rounded-2xl bg-teal-500 text-white flex items-center justify-center font-black text-2xl font-serif">
+                  <div className="bg-white rounded-2xl border border-neutral-100/40 p-4 flex flex-col md:flex-row justify-between items-stretch gap-4 text-left" id="my-profile-banner">
+                    <div className="flex gap-3 items-center">
+                      <div className="w-10 h-10 rounded-xl bg-orange-50 text-[#FF4D00] flex items-center justify-center font-semibold text-sm">
                         {userSession ? userSession.name.split(" ").map(n => n[0]).join("") : "AP"}
                       </div>
                       <div>
-                        <h3 className="text-2xl font-black text-slate-905">{userSession ? userSession.name : "Alex Patel (You)"}</h3>
-                        <p className="text-xs text-slate-500 font-semibold">Registered Status: <span className="font-extrabold text-indigo-600 font-mono">Self Account</span> • Username: <span className="font-extrabold text-indigo-600">@{userSession ? userSession.username : "alex"}</span></p>
-                        <p className="text-xs text-slate-400">Current calendar birthday: <span className="font-semibold text-indigo-600 font-mono">{userSession ? userSession.birthday : "1997-06-25"}</span></p>
+                        <h3 className="text-sm font-semibold text-slate-900">{userSession ? userSession.name : "Alex Patel (You)"}</h3>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Registered Status: <span className="font-semibold text-[#FF4D00] font-mono">Self Account</span> • Username: <span className="font-semibold text-slate-600">@{userSession ? userSession.username : "alex"}</span></p>
+                        <p className="text-[11px] text-slate-400">Current calendar birthday: <span className="font-semibold text-[#FF4D00] font-mono">{userSession ? userSession.birthday : "1997-06-25"}</span></p>
                       </div>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row md:flex-row items-center gap-6 justify-between flex-1 md:flex-initial">
-                      <div className="flex items-center gap-4">
-                        <div className="bg-teal-50 p-4 rounded-2xl border border-teal-150 text-left min-w-[130px]">
-                          <span className="text-[9px] font-bold text-teal-800 uppercase block select-none">Desires bound</span>
-                          <span className="text-xl font-bold text-slate-900 block font-mono">{friends.find(f => f.id === 'alex')?.wishlist.length} items</span>
+                    <div className="flex flex-col sm:flex-row md:flex-row items-center gap-4 justify-between flex-1 md:flex-initial">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-slate-50/50 p-2.5 rounded-xl border border-slate-100 text-left min-w-[110px]">
+                          <span className="text-[9px] font-medium text-slate-400 uppercase block select-none">Desires bound</span>
+                          <span className="text-sm font-semibold text-slate-900 block font-mono">{friends.find(f => f.id === 'alex')?.wishlist.length} items</span>
                         </div>
-                        <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-150 text-left min-w-[130px]">
-                          <span className="text-[9px] font-bold text-indigo-800 uppercase block select-none">Claimed by friends</span>
-                          <span className="text-xl font-bold text-slate-900 block font-mono">
+                        <div className="bg-slate-50/50 p-2.5 rounded-xl border border-slate-100 text-left min-w-[110px]">
+                          <span className="text-[9px] font-medium text-slate-400 uppercase block select-none">Claimed by friends</span>
+                          <span className="text-sm font-semibold text-slate-900 block font-mono">
                             {friends.find(f => f.id === 'alex')?.wishlist.filter(w => w.isClaimed).length} items
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex flex-col justify-center gap-2 pl-0 md:pl-6 border-t pt-4 sm:pt-0 sm:border-t-0 md:border-t-0 md:border-l md:border-slate-150 w-full sm:w-auto min-w-[160px]">
+                      <div className="flex flex-col justify-center gap-1.5 pl-0 md:pl-4 border-t pt-3 sm:pt-0 sm:border-t-0 md:border-t-0 md:border-l md:border-slate-100 w-full sm:w-auto min-w-[150px]">
                         <button
                           type="button"
                           onClick={() => setIsShareModalOpen(true)}
-                          className="bg-indigo-600 hover:bg-indigo-755 text-white text-xs font-black py-2.5 px-4 rounded-xl shadow cursor-pointer transition-colors flex items-center justify-center gap-1.5"
+                          className="bg-[#FF4D00] hover:bg-[#e04400] text-white text-xs font-semibold py-1.5 px-3 rounded-lg shadow-xs cursor-pointer transition-colors flex items-center justify-center gap-1.5"
                         >
                           <QrCode className="w-3.5 h-3.5" />
                           <span>Share QR Pass</span>
@@ -6518,7 +6609,7 @@ export default function App() {
                             navigator.clipboard.writeText(shareUrl);
                             triggerToast("Copied External Link! 🔗", "Ready to share with friends outside the app.");
                           }}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                          className="bg-slate-50 hover:bg-slate-100 text-slate-600 text-[10px] font-normal py-1 px-2.5 rounded-md transition-colors flex items-center justify-center gap-1 cursor-pointer"
                         >
                           <Share2 className="w-3 h-3" />
                           <span>Copy Share Link</span>
@@ -6528,23 +6619,23 @@ export default function App() {
                   </div>
 
                   {/* Private desires workspace table panel */}
-                  <div className="bg-white rounded-[2rem] border border-slate-200 p-6 md:p-8 text-left">
-                    <div className="flex justify-between items-center mb-6">
-                      <h4 className="font-bold text-base text-slate-850 flex items-center gap-2">
-                        <GiftIcon className="w-5 h-5 text-rose-500 animate-pulse" /> My Public Wishlist Folders
+                  <div className="bg-white rounded-2xl border border-neutral-100/40 p-4 text-left">
+                    <div className="flex justify-between items-center mb-4">
+                      <h4 className="font-semibold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <GiftIcon className="w-3.5 h-3.5 text-[#FF4D00]" /> My Public Wishlist Folders
                       </h4>
-                      <p className="text-xs text-slate-400">Claims made on this screen simulation represent companions reserving gifts for your landmark day.</p>
+                      <p className="text-[11px] text-slate-400">Claims made on this screen simulation represent companions reserving gifts for your landmark day.</p>
                     </div>
 
                     {/* Grid items */}
                     {((friends.find(f => f.id === 'alex')?.wishlist?.length || 0) === 0) ? (
-                      <div className="text-center py-12 px-6 bg-slate-50 border border-dashed border-slate-200 rounded-[1.5rem] flex flex-col items-center justify-center space-y-3">
-                        <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center animate-pulse">
-                          <GiftIcon className="w-8 h-8" />
+                      <div className="text-center py-10 px-4 bg-[#FDFBF7]/50 border border-dashed border-neutral-150 rounded-xl flex flex-col items-center justify-center space-y-2">
+                        <div className="w-12 h-12 bg-orange-50 text-[#FF4D00] rounded-full flex items-center justify-center">
+                          <GiftIcon className="w-6 h-6" />
                         </div>
-                        <div className="space-y-1">
-                          <h5 className="font-extrabold text-sm text-slate-800">Your Birthday Wishlist is Empty</h5>
-                          <p className="text-xs text-slate-500 max-w-sm">
+                        <div className="space-y-0.5">
+                          <h5 className="font-semibold text-xs text-slate-800">Your Birthday Wishlist is Empty</h5>
+                          <p className="text-[11px] text-slate-400 max-w-sm">
                             Add some gift items or desires so your companions know exactly how to celebrate and surprise you on your special day!
                           </p>
                         </div>
@@ -6555,30 +6646,30 @@ export default function App() {
                               setSelectedFriendId("alex");
                               setIsAddingWish(true);
                             }}
-                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow transition-all cursor-pointer flex items-center gap-1.5"
+                            className="px-3 py-1.5 bg-[#FF4D00] hover:bg-[#e04400] text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
                           >
-                            <Plus className="w-4 h-4" />
+                            <Plus className="w-3.5 h-3.5" />
                             <span>Create First Wish</span>
                           </button>
                         )}
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {friends.find(f => f.id === 'alex')?.wishlist.map(wish => (
                           <div 
                             key={wish.id}
-                            className="p-4 rounded-2xl border border-slate-150 bg-slate-50 flex justify-between items-start gap-4 transition-all hover:bg-slate-100/50"
+                            className="p-3.5 rounded-xl border border-neutral-100/40 bg-[#FDFBF7]/50 flex justify-between items-start gap-3 transition-all hover:bg-slate-50"
                           >
                             <div className="flex-1">
-                              <span className="text-xs font-bold text-slate-850 block">{wish.title}</span>
-                              <div className="flex items-center gap-3 mt-1.5">
-                                <span className="text-xs font-black text-emerald-600 font-mono">{wish.price}</span>
+                              <span className="text-xs font-semibold text-slate-900 block">{wish.title}</span>
+                              <div className="flex items-center gap-2.5 mt-1">
+                                <span className="text-xs font-semibold text-[#FF4D00] font-mono">{wish.price}</span>
                                 {wish.url && (
                                   <a 
                                     href={wish.url} 
                                     target="_blank" 
                                     rel="noopener noreferrer" 
-                                    className="text-[10px] text-indigo-600 font-bold hover:underline flex items-center gap-0.5"
+                                    className="text-[10px] text-slate-400 hover:text-[#FF4D00] font-normal flex items-center gap-0.5"
                                   >
                                     Store reference <ExternalLink className="w-2.5 h-2.5" />
                                   </a>
@@ -6586,7 +6677,7 @@ export default function App() {
                               </div>
 
                               {wish.isClaimed && (
-                                <div className="mt-3 bg-teal-500/10 border border-teal-500/20 text-teal-850 text-[9.5px] font-bold p-1 px-2.5 rounded-lg w-fit">
+                                <div className="mt-2 bg-orange-50 text-[#FF4D00] text-[9px] font-semibold p-0.5 px-2 rounded w-fit">
                                   🔒 Reserved in secret by {wish.claimedBy}
                                 </div>
                               )}
@@ -6599,16 +6690,16 @@ export default function App() {
                                   startEditingWishlistItem(wish);
                                   setActiveSection("registry");
                                 }}
-                                className="p-1 px-2 text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 rounded block font-semibold cursor-pointer"
+                                className="p-1 px-1.5 text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-600 rounded block font-medium cursor-pointer"
                               >
-                                Modify Entry
+                                Modify
                               </button>
                               <button
                                 onClick={() => {
                                   setSelectedFriendId("alex");
                                   deleteWishlistItem(wish.id);
                                 }}
-                                className="p-1 px-2 text-[10px] bg-rose-50 hover:bg-rose-100 text-rose-650 rounded block mt-1 cursor-pointer"
+                                className="p-1 px-1.5 text-[10px] bg-rose-50/50 hover:bg-rose-100/60 text-rose-600 rounded block mt-1 font-medium cursor-pointer"
                               >
                                 Delete
                               </button>
@@ -6618,60 +6709,60 @@ export default function App() {
                       </div>
                     )}
 
-{/* Trigger to quick add wishes to Alexa self */}
-<div className="pt-6 border-t border-slate-150 mt-6">
-  {!isAddingWish ? (
-    <button
-      onClick={() => {
-        setSelectedFriendId("alex");
-        setIsAddingWish(true);
-      }}
-      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow transition-all flex items-center justify-center gap-2 cursor-pointer"
-    >
-      <Plus className="w-4 h-4" />
-      <span>Add to my wishlist</span>
-    </button>
-  ) : (
-    <form onSubmit={addWishlistItem} className="bg-slate-50 p-4 border border-slate-200 rounded-2xl space-y-3">
-      <div className="flex justify-between items-center">
-        <h5 className="text-[11px] font-bold text-slate-700 uppercase">New Wish Item</h5>
-        <button type="button" onClick={() => setIsAddingWish(false)} className="text-slate-400 hover:text-slate-600">
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
-      <input
-        type="text"
-        required
-        placeholder="Item name e.g. Nike Air Max"
-        value={newItemTitle}
-        onChange={(e) => setNewItemTitle(e.target.value)}
-        className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
-      />
-      <div className="grid grid-cols-2 gap-2">
-        <input
-          type="text"
-          placeholder="Price e.g. $50"
-          value={newItemPrice}
-          onChange={(e) => setNewItemPrice(e.target.value)}
-          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
-        />
-        <input
-          type="text"
-          placeholder="Store URL (optional)"
-          value={newItemUrl}
-          onChange={(e) => setNewItemUrl(e.target.value)}
-          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:outline-none"
-        />
-      </div>
-      <button
-        type="submit"
-        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
-      >
-        Save to Wishlist
-      </button>
-    </form>
-  )}
-</div>
+                    {/* Trigger to quick add wishes to Alexa self */}
+                    <div className="pt-4 border-t border-slate-100 mt-4">
+                      {!isAddingWish ? (
+                        <button
+                          onClick={() => {
+                            setSelectedFriendId("alex");
+                            setIsAddingWish(true);
+                          }}
+                          className="w-full py-2 bg-[#FF4D00] hover:bg-[#e04400] text-white rounded-xl text-xs font-semibold shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add to my wishlist</span>
+                        </button>
+                      ) : (
+                        <form onSubmit={addWishlistItem} className="bg-[#FDFBF7]/50 p-3.5 border border-neutral-100/40 rounded-xl space-y-2.5">
+                          <div className="flex justify-between items-center">
+                            <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">New Wish Item</h5>
+                            <button type="button" onClick={() => setIsAddingWish(false)} className="text-slate-400 hover:text-slate-600">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Item name e.g. Nike Air Max"
+                            value={newItemTitle}
+                            onChange={(e) => setNewItemTitle(e.target.value)}
+                            className="w-full bg-white/50 border border-slate-200/60 text-slate-800 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-[#FF4D00]/50 transition-colors"
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              placeholder="Price e.g. $50"
+                              value={newItemPrice}
+                              onChange={(e) => setNewItemPrice(e.target.value)}
+                              className="w-full bg-white/50 border border-slate-200/60 text-slate-800 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-[#FF4D00]/50 transition-colors"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Store URL (optional)"
+                              value={newItemUrl}
+                              onChange={(e) => setNewItemUrl(e.target.value)}
+                              className="w-full bg-white/50 border border-slate-200/60 text-slate-800 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-[#FF4D00]/50 transition-colors"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            className="w-full py-1.5 bg-[#FF4D00] hover:bg-[#e04400] text-white text-xs font-semibold rounded-xl cursor-pointer"
+                          >
+                            Save to Wishlist
+                          </button>
+                        </form>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -6680,26 +6771,26 @@ export default function App() {
               {/* ==================== SUB-TAB 4: TROPHIES & LOGS ==================== */}
               {activeSection === "profile" && profileSubTab === "trophies" && (
                 <div className="space-y-6 text-left animate-fade-in" id="profile-subtab-trophies">
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
-                    <div className="md:col-span-8 bg-white rounded-3xl border border-slate-200 p-6 flex flex-col justify-between">
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
+                    <div className="md:col-span-8 bg-white rounded-2xl border border-neutral-100/40 p-4 flex flex-col justify-between">
                       <div>
-                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest block">Gamification Analyzer</span>
-                        <h3 className="text-xl font-extrabold text-slate-900 mt-1">{userSession ? userSession.name.split(" ")[0] : "Alexander"}'s Pro Gift-Giving Milestones</h3>
-                        <p className="text-xs text-slate-500 mt-0.5 animate-pulse">Collect trophies by creating active lists and claiming companion wishes</p>
+                        <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider block">Gamification Analyzer</span>
+                        <h3 className="text-sm font-semibold text-slate-900 mt-1">{userSession ? userSession.name.split(" ")[0] : "Alexander"}'s Pro Gift-Giving Milestones</h3>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Collect trophies by creating active lists and claiming companion wishes</p>
                       </div>
 
-                      <div className="mt-6 space-y-2">
-                        <div className="flex justify-between items-center text-xs">
-                          <span className="font-extrabold text-indigo-600 uppercase tracking-wider">Level Progression</span>
-                          <span className="font-black text-indigo-755 font-mono">Level {unlockLevel} (Gift Master Rank)</span>
+                      <div className="mt-4 space-y-2">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="font-semibold text-[#FF4D00] uppercase tracking-wider">Level Progression</span>
+                          <span className="font-medium text-slate-600 font-mono">Level {unlockLevel} (Gift Master Rank)</span>
                         </div>
-                        <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden border border-slate-200">
+                        <div className="w-full bg-slate-50 rounded-full h-2 overflow-hidden border border-slate-100">
                           <div 
-                            className="bg-indigo-600 h-full rounded-full transition-all duration-500"
+                            className="bg-[#FF4D00] h-full rounded-full transition-all duration-500"
                             style={{ width: `${Math.min((friends.find(f => f.id === 'alex')?.achievements.length || 0) * 20, 100)}%` }}
                           />
                         </div>
-                        <div className="flex justify-between items-center text-[10px] text-zinc-400 font-semibold gap-1">
+                        <div className="flex justify-between items-center text-[10px] text-slate-400 font-normal gap-1">
                           <span>{(friends.find(f => f.id === 'alex')?.achievements.length || 0)} milestones unlocked</span>
                           <span>•</span>
                           <span>{6 - (friends.find(f => f.id === 'alex')?.achievements.length || 0)} left to max prestige</span>
@@ -6707,16 +6798,16 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="md:col-span-4 bg-emerald-50 rounded-3xl border border-emerald-150 p-6 flex flex-col justify-between">
+                    <div className="md:col-span-4 bg-[#FDFBF7] rounded-2xl border border-neutral-100/40 p-4 flex flex-col justify-between">
                       <div>
-                        <h4 className="font-extrabold text-emerald-950 text-sm">Coordinator Roster</h4>
-                        <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        <h4 className="font-semibold text-slate-800 text-xs uppercase tracking-wider">Coordinator Roster</h4>
+                        <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
                           Share achievements securely with your other sync groups by clicking each awarded badge copy.
                         </p>
                       </div>
-                      <div className="bg-white/80 rounded-2xl p-3 border border-emerald-250 text-[11px] font-semibold">
-                        🏆 Prestige Ranks: 
-                        <ul className="list-disc pl-4 mt-1 font-normal text-slate-500 space-y-0.5">
+                      <div className="bg-white/80 rounded-xl p-2.5 border border-neutral-100/40 text-[10px] font-medium mt-3">
+                        <span className="text-slate-800 font-semibold">🏆 Prestige Ranks:</span> 
+                        <ul className="list-disc pl-3 mt-1 font-normal text-slate-400 space-y-0.5">
                           <li>Novice Coordinator (Lvl 1 - 3)</li>
                           <li>Expert Scheduler (Lvl 4 - 7)</li>
                           <li>Elite Gift Master (Lvl 8 - 12)</li>
@@ -6726,10 +6817,10 @@ export default function App() {
                   </div>
 
                   {/* Badges Grid */}
-                  <div className="bg-white rounded-[2rem] border border-slate-200 p-6 md:p-8">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-4">Milestones Achievements Directory</span>
+                  <div className="bg-white rounded-2xl border border-neutral-100/40 p-4">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-3">Milestones Achievements Directory</span>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4" id="badges-grid-roster">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3" id="badges-grid-roster">
                       {ALL_ACHIEVEMENTS_LIST.map((ach) => {
                         const isUnlocked = friends.find(f => f.id === 'alex')?.achievements.some(a => a.title === ach.title);
                         
@@ -6746,22 +6837,22 @@ export default function App() {
                                 triggerToast("Locked Milestone", "Complete wishlist directories or claim tasks to award this badge.");
                               }
                             }}
-                            className={`p-4 rounded-2xl border transition-all flex items-center gap-3.5 ${
+                            className={`p-3 rounded-xl border transition-all flex items-center gap-3 ${
                               isUnlocked 
-                                ? "bg-gradient-to-br from-emerald-50 to-emerald-100/40 border-emerald-350 hover:border-emerald-500 cursor-pointer shadow-xs" 
-                                : "bg-slate-50 border-slate-150 opacity-60"
+                                ? "bg-orange-50/20 border-orange-100 hover:border-[#FF4D00] cursor-pointer" 
+                                : "bg-slate-50/50 border-slate-100 opacity-60"
                             }`}
                             title={isUnlocked ? "Click to copy achievement to clipboard" : "Milestone Locked"}
                           >
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm font-serif shrink-0 border ${
-                              isUnlocked ? "bg-emerald-500 text-white border-emerald-350" : "bg-slate-200 text-slate-400 border-slate-300"
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-serif shrink-0 border ${
+                              isUnlocked ? "bg-[#FF4D00] text-white border-orange-100" : "bg-slate-200 text-slate-400 border-slate-200"
                             }`}>
                               {isUnlocked ? "🏆" : "🔒"}
                             </div>
 
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs font-black text-slate-900 leading-tight block truncate">{ach.title}</p>
-                              <p className="text-[10px] text-slate-500 leading-tight mt-0.5">{ach.description}</p>
+                              <p className="text-xs font-semibold text-slate-900 leading-tight block truncate">{ach.title}</p>
+                              <p className="text-[10px] text-slate-400 leading-tight mt-0.5">{ach.description}</p>
                             </div>
                           </div>
                         );
@@ -7191,147 +7282,148 @@ export default function App() {
 
               {/* TAB 1: BOUTIQUE GALLERY */}
               {giftStoreTab === "gallery" && (
-                <div className="space-y-3">
-                  {/* Swipeable single-gift carousel */}
-                  <motion.div
-                    key={selectedStoreGift.id}
-                    initial={{ opacity: 0, x: 16 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -16 }}
-                    onPointerDown={(e) => setGiftSwipeStartX(e.clientX)}
-                    onPointerUp={(e) => {
-                      if (giftSwipeStartX === null) return;
-                      const delta = e.clientX - giftSwipeStartX;
-                      if (Math.abs(delta) > 48) {
-                        setGiftCarouselIndex((prev) => (delta < 0
-                          ? (prev + 1) % GIFT_INVENTORY.length
-                          : (prev - 1 + GIFT_INVENTORY.length) % GIFT_INVENTORY.length));
+                <div className="space-y-5">
+                  {/* Category Pill Buttons */}
+                  <div className="flex gap-2 bg-slate-100 p-1 rounded-xl w-full">
+                    <button
+                      type="button"
+                      onClick={() => setGalleryCategory("foryou")}
+                      className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                        galleryCategory === "foryou"
+                          ? "bg-white text-slate-900 shadow-sm"
+                          : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      For You
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGalleryCategory("popular")}
+                      className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                        galleryCategory === "popular"
+                          ? "bg-white text-slate-900 shadow-sm"
+                          : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      Popular
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGalleryCategory("premium")}
+                      className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                        galleryCategory === "premium"
+                          ? "bg-white text-slate-900 shadow-sm"
+                          : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      Premium
+                    </button>
+                  </div>
+
+                  {/* Vertical Gifts List */}
+                  <div className="space-y-3.5">
+                    {GIFT_INVENTORY.filter(item => {
+                      if (galleryCategory === "foryou") {
+                        return ["letter_handwritten", "rose_regular", "chocolate_artisan"].includes(item.id);
                       }
-                      setGiftSwipeStartX(null);
-                    }}
-                    className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] p-3 text-left space-y-3 relative overflow-hidden"
-                  >
-                    {/* Header: emoji 24px + title 14px semibold + category hint */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <span className="text-[10px] text-slate-400 font-normal uppercase tracking-wider block">
-                          {selectedStoreGift.category}
-                        </span>
-                        <div className="flex items-center gap-2 mt-1 truncate">
-                          <span className="text-[24px] shrink-0" role="img" aria-label={selectedStoreGift.name}>{selectedStoreGift.emoji}</span>
-                          <h4 className="text-[14px] font-semibold text-slate-900 truncate">{selectedStoreGift.name}</h4>
-                        </div>
-                        <p className="text-[11px] text-slate-400 truncate mt-0.5">{selectedStoreGift.description}</p>
-                      </div>
-                      <span className="text-[12px] font-semibold text-indigo-600 font-mono shrink-0">
-                        {getFormattedPrice(selectedStoreGift.usdPrice)}
-                      </span>
-                    </div>
-
-                    {/* Contribution Input Area */}
-                    <div className="space-y-1.5 pt-1 border-t border-slate-100">
-                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        Contribution Amount (GHS)
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min={giftAmountMin}
-                          max={giftAmountMax}
-                          value={giftContributionAmount}
-                          onChange={(e) => setGiftContributionAmount(e.target.value)}
-                          className="flex-1 h-9 bg-slate-50 border border-slate-300 rounded-lg px-3 text-[13px] font-mono outline-none focus:border-indigo-600 focus:bg-white transition-colors"
-                        />
-                      </div>
-                      <p className="text-[11px] text-slate-400">
-                        Any amount from GHS {giftAmountMin} to GHS {giftAmountMax}
-                      </p>
-                    </div>
-
-                    {/* Send Button */}
-                    <div className="pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const amount = Number(giftContributionAmount);
-                          if (!amount || amount < giftAmountMin || amount > giftAmountMax) {
-                            triggerToast("Invalid Amount", `Enter GHS ${giftAmountMin} to GHS ${giftAmountMax}.`);
-                            return;
-                          }
-                          setCustomGiftStoreItem({ id: selectedStoreGift.id, name: selectedStoreGift.name, type: selectedStoreGift.type, usdPrice: selectedStoreGift.usdPrice });
-                          if (friends.length > 0) {
-                            setGiftRecipientId(friends[0].id);
-                            const yr = new Date().getFullYear();
-                            const bdy = friends[0].birthday;
-                            if (bdy) {
-                              const parts = bdy.split("-");
-                              setGiftRevealDate(parts.length === 3 ? `${yr}-${parts[1]}-${parts[2]}` : getTodayDateString());
+                      if (galleryCategory === "popular") {
+                        return ["rose_regular", "chocolate_artisan", "cake_deluxe"].includes(item.id);
+                      }
+                      if (galleryCategory === "premium") {
+                        return ["cake_deluxe", "champagne_celebration", "money_sack"].includes(item.id);
+                      }
+                      return true;
+                    }).map((gift) => {
+                      const priceInGhs = Math.round(gift.usdPrice * 12);
+                      return (
+                        <div
+                          key={gift.id}
+                          onClick={() => {
+                            setCustomGiftStoreItem({ id: gift.id, name: gift.name, type: gift.type, usdPrice: gift.usdPrice });
+                            if (friends.length > 0) {
+                              setGiftRecipientId(friends[0].id);
+                              const yr = new Date().getFullYear();
+                              const bdy = friends[0].birthday;
+                              if (bdy) {
+                                const parts = bdy.split("-");
+                                setGiftRevealDate(parts.length === 3 ? `${yr}-${parts[1]}-${parts[2]}` : getTodayDateString());
+                              } else {
+                                setGiftRevealDate(getTodayDateString());
+                              }
                             } else {
+                              setGiftRecipientId("");
                               setGiftRevealDate(getTodayDateString());
                             }
-                          } else {
-                            setGiftRecipientId("");
-                            setGiftRevealDate(getTodayDateString());
-                          }
-                          setGiftRecipientMessage(`Sending ${selectedStoreGift.emoji} ${selectedStoreGift.name} celebration gift.`);
-                          setGiftPaymentMethod("momo");
-                        }}
-                        className="w-full h-10 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-[13px] rounded-lg cursor-pointer transition-colors shadow-xs flex items-center justify-center gap-1.5"
-                      >
-                        Send this gift →
-                      </button>
-                    </div>
+                            setGiftRecipientMessage(`Happy Birthday! 🎉 Wishing you nothing but the best today and always.`);
+                            setGiftPaymentMethod("momo");
+                          }}
+                          className="bg-white hover:bg-slate-50/40 rounded-3xl p-3.5 flex items-center justify-between gap-4 border border-slate-100 shadow-premium cursor-pointer transition active:scale-[0.99] group text-left"
+                        >
+                          <div className="flex items-center gap-4 min-w-0 flex-1">
+                            {/* Graphic left */}
+                            <div className="w-14 h-14 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center text-3xl shrink-0 group-hover:scale-105 transition-transform shadow-sm">
+                              {gift.emoji}
+                            </div>
+                            
+                            {/* Meta Center */}
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <h4 className="text-xs font-bold text-slate-900 group-hover:text-indigo-600 transition-colors leading-snug">
+                                {gift.name}
+                              </h4>
+                              <p className="text-[11px] font-bold text-indigo-500 font-mono">
+                                GHS {priceInGhs}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-medium leading-relaxed line-clamp-2">
+                                {gift.description}
+                              </p>
+                            </div>
+                          </div>
 
-                    {/* Dot Indicators */}
-                    <div className="flex items-center justify-center gap-1.5 pt-2">
-                      {GIFT_INVENTORY.map((_, index) => (
-                        <button
-                          key={index}
-                          type="button"
-                          onClick={() => setGiftCarouselIndex(index)}
-                          className={`h-1.5 rounded-full transition-all cursor-pointer ${
-                            index === giftCarouselIndex ? "w-5 bg-indigo-600" : "w-1.5 bg-slate-200 hover:bg-slate-300"
-                          }`}
-                          aria-label={`Go to slide ${index + 1}`}
-                        />
-                      ))}
-                    </div>
-                  </motion.div>
+                          {/* Heart Outline Right */}
+                          <div className="shrink-0 p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+                            </svg>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
               {/* TAB 2: ACTIVE GIFT POOLS */}
               {giftStoreTab === "pools" && (
-                <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 space-y-5 text-left shadow-xs">
+                <div className="bg-white border border-slate-100 rounded-[2rem] p-6 space-y-5 text-left shadow-premium">
                   <div>
-                    <h4 className="font-extrabold text-sm text-zinc-900 flex items-center gap-2">
-                      <Gift className="w-4.5 h-4.5 text-violet-600" />
+                    <h4 className="font-bold text-sm text-slate-900 flex items-center gap-2 font-display">
+                      <Gift className="w-4.5 h-4.5 text-indigo-500" />
                       <span>Active Gift Pools</span>
                     </h4>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
+                    <p className="text-[11px] text-slate-400 mt-0.5 font-medium">
                       Browse every tracked buddy with an upcoming milestone. Gift-pool actions stay out of Home and live here or inside an individual buddy profile.
                     </p>
                   </div>
 
                   {activeGiftPools.length === 0 ? (
-                    <div className="border-2 border-dashed border-slate-200 bg-slate-50/50 rounded-2xl p-10 text-center">
+                    <div className="border border-dashed border-slate-200 bg-slate-50/50 rounded-2xl p-10 text-center">
                       <div className="text-4xl">🎁</div>
-                      <h5 className="text-xs font-black text-zinc-700 mt-3">No active pools yet</h5>
-                      <p className="text-[10px] text-slate-400 mt-1 max-w-sm mx-auto">
+                      <h5 className="text-xs font-bold text-slate-800 mt-3">No active pools yet</h5>
+                      <p className="text-[10px] text-slate-400 mt-1 max-w-sm mx-auto font-medium">
                         Add a buddy with an upcoming birthday to create a pool entry here.
                       </p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                       {activeGiftPools.map((friend) => (
-                        <div key={friend.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 flex items-center justify-between gap-3">
+                        <div key={friend.id} className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 flex items-center justify-between gap-3 shadow-sm">
                           <div className="flex items-center gap-3 min-w-0">
-                            <div className={`w-11 h-11 rounded-2xl ${friend.avatar || "bg-indigo-500"} text-white flex items-center justify-center font-black text-sm shrink-0`}>
+                            <div className={`w-11 h-11 rounded-xl ${friend.avatar || "bg-indigo-500"} text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-sm`}>
                               {friend.name.split(" ").map((n) => n[0] || "").slice(0, 2).join("")}
                             </div>
                             <div className="min-w-0">
-                              <p className="text-sm font-black text-slate-900 truncate">{friend.name}</p>
-                              <p className="text-[11px] text-slate-500 mt-0.5">
+                              <p className="text-sm font-bold text-slate-900 truncate">{friend.name}</p>
+                              <p className="text-[11px] text-slate-400 mt-0.5 font-semibold font-mono">
                                 {formatBirthdayDate(friend.birthday)} • {calculateDaysRemaining(friend.birthday)} days left
                               </p>
                             </div>
@@ -7344,7 +7436,7 @@ export default function App() {
                                 setActiveSection("registry");
                                 window.scrollTo({ top: 0, behavior: "smooth" });
                               }}
-                              className="text-[11px] font-black text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-100 px-3 py-2 rounded-xl"
+                              className="text-[11px] font-semibold text-indigo-600 bg-indigo-50/50 hover:bg-indigo-50 px-3 py-2 rounded-xl cursor-pointer"
                             >
                               Manage
                             </button>
@@ -7357,7 +7449,7 @@ export default function App() {
                                 triggerToast("Gift Pool Opened 🎁", `Choose a gift for ${friend.name}.`);
                                 window.scrollTo({ top: 0, behavior: "smooth" });
                               }}
-                              className="text-[11px] font-black text-white bg-rose-600 hover:bg-rose-700 px-3 py-2 rounded-xl"
+                              className="text-[11px] font-semibold text-white bg-gradient-to-r from-indigo-500 to-purple-500 hover:brightness-105 px-3 py-2 rounded-xl cursor-pointer shadow-sm transition"
                             >
                               Send gift
                             </button>
@@ -7537,271 +7629,239 @@ export default function App() {
               )}
 
               {/* CHECKOUT SYSTEM SLIDE-OVER OVERLAY MODAL */}
-              {customGiftStoreItem && (
-                <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-[9999] animate-fade-in">
-                  <div className="bg-white w-full max-w-lg rounded-3xl border border-rose-100 shadow-2xl relative overflow-hidden flex flex-col justify-between">
-                    {/* Header bar */}
-                    <div className="bg-gradient-to-r from-rose-900 to-indigo-950 p-5 text-left text-white flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="text-2xl">
-                          {customGiftStoreItem.type === "rose" && "🌹"}
-                          {customGiftStoreItem.type === "bouquet" && "💐"}
-                          {customGiftStoreItem.type === "money" && "💰"}
-                        </span>
-                        <div>
-                          <h4 className="font-extrabold text-sm text-white">Interactive Gift Dispatch Panel</h4>
-                          <span className="text-[10px] text-rose-200 uppercase font-mono font-bold tracking-wide">
-                            Checkout Present: {customGiftStoreItem.name}
-                          </span>
-                        </div>
+              {customGiftStoreItem && (() => {
+                const selectedFriend = friends.find(f => f.id === giftRecipientId) || friends[0];
+                return (
+                  <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-[9999] animate-fade-in">
+                    <div className="bg-white w-full max-w-sm rounded-[2.5rem] border border-slate-100 shadow-2xl relative overflow-hidden flex flex-col justify-between p-6 space-y-4">
+                      {/* Header bar */}
+                      <div className="flex justify-between items-center">
+                        <button
+                          type="button"
+                          onClick={() => setCustomGiftStoreItem(null)}
+                          className="w-9 h-9 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                          </svg>
+                        </button>
+                        <h4 className="font-display font-black text-xs text-slate-900 uppercase tracking-widest">
+                          Send Gift
+                        </h4>
+                        <div className="w-9" /> {/* spacer */}
                       </div>
-                      <button
-                        onClick={() => setCustomGiftStoreItem(null)}
-                        className="p-1 px-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-xs cursor-pointer transition border border-white/10"
-                      >
-                        ✕
-                      </button>
-                    </div>
 
-                    {/* Modal Main Form Content */}
-                    <div className="p-6 md:p-8 space-y-5 text-left max-h-[75vh] overflow-y-auto">
-                      {isGiftProcessing ? (
-                        <div className="p-10 text-center flex flex-col items-center justify-center space-y-4">
-                          <div className="w-12 h-12 border-4 border-rose-500 border-t-transparent rounded-full animate-spin" />
-                          <h5 className="text-sm font-black text-zinc-900 mt-2">Active Sandbox Gateway Link Established</h5>
-                          <span className="text-xs text-indigo-650 font-mono font-bold bg-indigo-50 px-3 py-1 rounded-lg">
-                            {giftProcessingStep}
-                          </span>
-                          <p className="text-[10.5px] text-slate-400 font-normal leading-normal max-w-xs font-sans text-center">
-                            Authorizing instant credit and preparing hand-wrapped companion parcel. Chimes will fire upon confirmation signal...
-                          </p>
-                        </div>
-                      ) : (
-                        <>
-                          {/* Pick Buddy Dropdown */}
-                          <div className="space-y-1.5 text-left">
-                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                              Recipient Companion Buddy
-                            </label>
-                            {friends.length === 0 ? (
-                              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">
-                                ⚠️ No active companion profile found in registry index! Register a buddy profile before gifting.
-                              </div>
-                            ) : (
-                              <select
-                                value={giftRecipientId}
-                                onChange={(e) => setGiftRecipientId(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-205 rounded-xl px-3.5 py-3 text-xs font-semibold outline-none focus:border-indigo-650 cursor-pointer"
-                              >
-                                {friends.map((f) => (
-                                  <option key={f.id} value={f.id}>
-                                    👤 {f.name} (Upcoming Celebration: {f.birthday})
-                                  </option>
-                                ))}
-                              </select>
-                            )}
+                      {/* Modal Main Form Content */}
+                      <div className="space-y-4 text-left">
+                        {isGiftProcessing ? (
+                          <div className="py-12 text-center flex flex-col items-center justify-center space-y-4">
+                            <div className="w-10 h-10 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                            <h5 className="text-xs font-bold text-slate-900 mt-2">Active Sandbox Gateway Link</h5>
+                            <span className="text-[10px] text-indigo-600 font-mono font-bold bg-indigo-50/50 px-2.5 py-1 rounded-full">
+                              {giftProcessingStep}
+                            </span>
+                            <p className="text-[10px] text-slate-400 font-medium leading-normal max-w-[240px] text-center">
+                              Authorizing instant credit and preparing hand-wrapped companion parcel. Chimes will fire upon confirmation signal...
+                            </p>
                           </div>
+                        ) : (
+                          <>
+                            {/* Pick Buddy Dropdown - Styled with absolute hidden select for native picker compatibility */}
+                            <div className="relative">
+                              {friends.length > 0 && (
+                                <select
+                                  value={giftRecipientId}
+                                  onChange={(e) => setGiftRecipientId(e.target.value)}
+                                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-20"
+                                >
+                                  {friends.map((f) => (
+                                    <option key={f.id} value={f.id}>
+                                      {f.name} (@{f.username || f.id})
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 flex items-center justify-between gap-3 relative z-10 hover:bg-slate-100/50 transition">
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-8.5 h-8.5 rounded-full ${selectedFriend?.avatar || "bg-indigo-500"} text-white flex items-center justify-center font-bold text-[10.5px] shadow-sm`}>
+                                    {selectedFriend ? selectedFriend.name[0]?.toUpperCase() : "👥"}
+                                  </div>
+                                  <div className="text-left">
+                                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block leading-none mb-0.5">To:</span>
+                                    <span className="text-xs font-bold text-slate-900 leading-tight block">
+                                      {selectedFriend ? selectedFriend.name : "Select Buddy"}
+                                    </span>
+                                    <span className="text-[9.5px] text-indigo-500 font-semibold block leading-none">
+                                      @{selectedFriend ? (selectedFriend.username || selectedFriend.id) : "buddy"}
+                                    </span>
+                                  </div>
+                                </div>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-slate-400">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                </svg>
+                              </div>
+                            </div>
 
-                          {/* Greetings message cards input */}
-                          <div className="space-y-1.5 text-left">
-                            <div className="flex justify-between items-center">
-                              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                Greetings Card Dedication Message
-                              </label>
-                              <span className="text-[9.5px] font-mono font-bold text-slate-400">
-                                {giftRecipientMessage.length}/150 Chars
+                            {/* Gift Details Card */}
+                            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-11 h-11 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-2xl shadow-xs">
+                                  {customGiftStoreItem.type === "rose" && "🌹"}
+                                  {customGiftStoreItem.type === "bouquet" && "💐"}
+                                  {customGiftStoreItem.type === "money" && "💰"}
+                                  {customGiftStoreItem.type === "cake" && "🎂"}
+                                  {customGiftStoreItem.type === "chocolate" && "🍫"}
+                                  {customGiftStoreItem.type === "beverage" && "🍾"}
+                                  {customGiftStoreItem.type === "card" && "✍️"}
+                                </div>
+                                <div className="text-left">
+                                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block leading-none mb-0.5">Gift:</span>
+                                  <span className="text-xs font-bold text-slate-900 block">{customGiftStoreItem.name}</span>
+                                </div>
+                              </div>
+                              <span className="text-xs font-extrabold text-indigo-600 font-mono">
+                                GHS {Math.round(customGiftStoreItem.usdPrice * 12)}
                               </span>
                             </div>
-                            <textarea
-                              rows={3}
-                              maxLength={150}
-                              value={giftRecipientMessage}
-                              onChange={(e) => setGiftRecipientMessage(e.target.value)}
-                              placeholder="Write a sweet dedications note about special landmark memories..."
-                              className="w-full bg-slate-50 border border-slate-205 rounded-xl p-3 text-xs outline-none focus:border-indigo-650 resize-none font-sans"
-                            />
-                          </div>
 
-                          {/* Payment method selector */}
-                          <div className="space-y-3 pt-2">
-                            <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 text-left">
-                              Select Payment Source / Sandbox Token
-                            </span>
-                            <div className="grid grid-cols-3 gap-3">
-                              {/* Option 1: MOMO */}
-                              <button
-                                type="button"
-                                onClick={() => setGiftPaymentMethod("momo")}
-                                className={`p-3 rounded-xl border flex flex-col justify-between h-20 text-left cursor-pointer transition-all ${
-                                  giftPaymentMethod === "momo"
-                                    ? "bg-indigo-600 border-indigo-600 text-white font-extrabold shadow-sm"
-                                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                                }`}
-                              >
-                                <span className="text-xs font-bold leading-tight block text-left">Mobile Money</span>
-                                <span className={`text-[8.5px] font-mono leading-none ${giftPaymentMethod === "momo" ? "text-indigo-200" : "text-slate-400"}`}>
-                                  GH Momo Portal
+                            {/* Greetings message cards input */}
+                            <div className="space-y-1 text-left">
+                              <div className="flex justify-between items-center px-0.5">
+                                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                  Message
+                                </label>
+                                <span className="text-[9px] font-bold text-slate-400 font-mono">
+                                  {giftRecipientMessage.length}/120
                                 </span>
-                              </button>
-
-                              {/* Option 2: CARD */}
-                              <button
-                                type="button"
-                                onClick={() => setGiftPaymentMethod("card")}
-                                className={`p-3 rounded-xl border flex flex-col justify-between h-20 text-left cursor-pointer transition-all ${
-                                  giftPaymentMethod === "card"
-                                    ? "bg-indigo-600 border-indigo-600 text-white font-extrabold shadow-sm"
-                                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                                }`}
-                              >
-                                <span className="text-xs font-bold leading-tight block text-left">Credit Card</span>
-                                <span className={`text-[8.5px] font-mono leading-none ${giftPaymentMethod === "card" ? "text-indigo-200" : "text-slate-400"}`}>
-                                  Visa / MasterCard
-                                </span>
-                              </button>
-
-                              {/* Option 3: Points wrapper */}
-                              <button
-                                type="button"
-                                onClick={() => setGiftPaymentMethod("points")}
-                                className={`p-3 rounded-xl border flex flex-col justify-between h-20 text-left cursor-pointer transition-all ${
-                                  giftPaymentMethod === "points"
-                                    ? "bg-indigo-600 border-indigo-600 text-white font-extrabold shadow-sm"
-                                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                                }`}
-                              >
-                                <span className="text-xs font-bold leading-tight block text-left">HBD Points</span>
-                                <span className={`text-[8.5px] font-mono leading-none ${giftPaymentMethod === "points" ? "text-indigo-200" : "text-slate-400"}`}>
-                                  Unlimited Sandbox
-                                </span>
-                              </button>
+                              </div>
+                              <textarea
+                                rows={3}
+                                maxLength={120}
+                                value={giftRecipientMessage}
+                                onChange={(e) => setGiftRecipientMessage(e.target.value)}
+                                placeholder="Happy Birthday! 🎉 Wishing you nothing but the best today and always."
+                                className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs outline-none focus:border-indigo-500 focus:bg-white resize-none font-sans"
+                              />
                             </div>
-                          </div>
 
-                          {/* Price calculation block */}
-                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center justify-between">
-                            <div>
-                              <span className="text-[10px] text-slate-400 block font-bold uppercase text-left">Authorized Price</span>
-                              <span className="text-slate-500 font-extrabold text-xs text-left block">Full Checkout Total</span>
+                            {/* Secret Surprise Toggle Option */}
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex items-center justify-between gap-3">
+                              <div className="text-left min-w-0">
+                                <span className="text-[10px] text-slate-900 font-bold block">Secret Surprise</span>
+                                <span className="text-[9px] text-slate-400 font-medium block mt-0.5">Hide tracking until birthday</span>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={giftIsSurprise}
+                                onChange={(e) => setGiftIsSurprise(e.target.checked)}
+                                className="w-4.5 h-4.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600 cursor-pointer"
+                              />
                             </div>
-                            <span className="text-lg font-black text-indigo-700 font-mono">
-                              {getFormattedPrice(customGiftStoreItem.usdPrice)}
-                            </span>
-                          </div>
 
-                          {/* Secret Surprise Gift Toggle Option */}
-                          <div className="bg-[#FAF9F6] p-4 rounded-xl border border-slate-200 flex items-center justify-between">
-                            <div className="text-left space-y-0.5 pr-3">
-                              <span className="text-[10px] text-indigo-600 font-black uppercase tracking-wider block">Secret Surprise Milestone</span>
-                              <span className="text-xs font-black text-slate-900 block">Hide tracking until birthday</span>
-                              <p className="text-[9.5px] text-slate-400 font-bold leading-normal font-sans">
-                                Bypasses public stream and isolates tracking logic from peer view until celebration date!
+                            {/* Insufficient balance validation card */}
+                            {walletBalance < (customGiftStoreItem.usdPrice * 12) && (
+                              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-[10.5px] font-bold text-rose-700 flex items-center gap-2">
+                                <span>⚠️</span>
+                                <span>Insufficient balance (GHS {Math.round(walletBalance)}) — deposit first</span>
+                              </div>
+                            )}
+
+                            {/* Error block if no friends */}
+                            {friends.length === 0 && (
+                              <p className="text-[9.5px] text-rose-600 font-bold">
+                                * You must have at least 1 buddy in your Registry to transmit celebration cards.
                               </p>
+                            )}
+
+                            <div className="border-t border-slate-100 my-1 pt-3 flex justify-between items-center px-0.5">
+                              <span className="text-xs font-bold text-slate-500">Total Amount:</span>
+                              <span className="text-sm font-black text-indigo-600 font-mono">
+                                GHS {Math.round(customGiftStoreItem.usdPrice * 12)}
+                              </span>
                             </div>
-                            <input
-                              type="checkbox"
-                              checked={giftIsSurprise}
-                              onChange={(e) => setGiftIsSurprise(e.target.checked)}
-                              className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600 cursor-pointer"
-                            />
-                          </div>
 
-                          {/* Insufficient balance validation card */}
-                          {walletBalance < (customGiftStoreItem.usdPrice * 12) && (
-                            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800 flex items-center gap-2 animate-pulse">
-                              <span>⚠️</span>
-                              <span>Insufficient balance — please deposit first</span>
-                            </div>
-                          )}
-
-                          {/* Error block if no friends */}
-                          {friends.length === 0 && (
-                            <p className="text-[10px] text-rose-600 font-bold">
-                              * You must have at least 1 registered buddy in your Registry Console to transmit celebration cards.
-                            </p>
-                          )}
-
-                          {/* Submit button */}
-                          <button
-                            type="button"
-                            disabled={friends.length === 0 || walletBalance < (customGiftStoreItem.usdPrice * 12)}
-                            onClick={() => {
-                              setIsGiftProcessing(true);
-                              setGiftProcessingStep("Linking with Secure Momo Node...");
-                              
-                              setTimeout(() => {
-                                setGiftProcessingStep("Encrypting Greetings Card Dedication...");
-                              }, 1100);
-
-                              setTimeout(() => {
-                                setGiftProcessingStep("Delivering Token parcel to Buddy locker...");
-                              }, 2200);
-
-                              setTimeout(() => {
-                                // Finalize checkout
-                                const selectedFriend = friends.find(f => f.id === giftRecipientId) || friends[0];
-                                const priceInGhs = customGiftStoreItem.usdPrice * 12;
+                            {/* Submit button */}
+                            <button
+                              type="button"
+                              disabled={friends.length === 0 || walletBalance < (customGiftStoreItem.usdPrice * 12)}
+                              onClick={() => {
+                                setIsGiftProcessing(true);
+                                setGiftProcessingStep("Linking with Secure Momo Node...");
                                 
-                                // Deduct from wallet balance
-                                setWalletBalance(prev => Math.max(0, prev - priceInGhs));
+                                setTimeout(() => {
+                                  setGiftProcessingStep("Encrypting Greetings Card Dedication...");
+                                }, 1100);
 
-                                const formattedPriceString = getFormattedPrice(customGiftStoreItem.usdPrice);
-                                const newGiftLog: SentGift = {
-                                  isOpened: false,
-                                  id: "gift_tx_" + Date.now(),
-                                  friendId: selectedFriend.id,
-                                  friendName: selectedFriend.name,
-                                  giftType: customGiftStoreItem.type,
-                                  giftName: customGiftStoreItem.name,
-                                  price: formattedPriceString,
-                                  status: "Delivered",
-                                  message: giftRecipientMessage.trim() || `Sent a lovely ${customGiftStoreItem.name}!`,
-                                  dateSent: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-                                  isSurprise: giftIsSurprise
-                                };
+                                setTimeout(() => {
+                                  setGiftProcessingStep("Delivering Token parcel to Buddy locker...");
+                                }, 2200);
 
-                                const updatedGifts = [newGiftLog, ...sentGifts];
-                                setSentGifts(updatedGifts);
-                                localStorage.setItem("hbd_sent_gifts_log", JSON.stringify(updatedGifts));
+                                setTimeout(() => {
+                                  // Finalize checkout
+                                  const targetFriend = friends.find(f => f.id === giftRecipientId) || friends[0];
+                                  const priceInGhs = customGiftStoreItem.usdPrice * 12;
+                                  
+                                  // Deduct from wallet balance
+                                  setWalletBalance(prev => Math.max(0, prev - priceInGhs));
 
-                                // Add Notification
-                                const newSysNotification = {
-                                  id: "notif_g_" + Date.now(),
-                                  type: "system" as const,
-                                  title: `🎁 Gift Token Dispatched!`,
-                                  message: `Successfully transmitted "${customGiftStoreItem.name}" to ${selectedFriend.name} registry locker (${formattedPriceString}).`,
-                                  timestamp: "Just Now",
-                                  isRead: false
-                                };
-                                setNotifications(prevNotifs => [newSysNotification, ...prevNotifs]);
+                                  const formattedPriceString = getFormattedPrice(customGiftStoreItem.usdPrice);
+                                  const newGiftLog: SentGift = {
+                                    isOpened: false,
+                                    id: "gift_tx_" + Date.now(),
+                                    friendId: targetFriend.id,
+                                    friendName: targetFriend.name,
+                                    giftType: customGiftStoreItem.type,
+                                    giftName: customGiftStoreItem.name,
+                                    price: formattedPriceString,
+                                    status: "Delivered",
+                                    message: giftRecipientMessage.trim() || `Sent a lovely ${customGiftStoreItem.name}!`,
+                                    dateSent: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+                                    isSurprise: giftIsSurprise
+                                  };
 
-                                // Post log
-                                appendLog(`Dispatched Interactive ${customGiftStoreItem.name} Present to ${selectedFriend.name} via ${giftPaymentMethod === "momo" ? "Mobile Money" : "Secure Node Pay"}.`);
+                                  const updatedGifts = [newGiftLog, ...sentGifts];
+                                  setSentGifts(updatedGifts);
+                                  localStorage.setItem("hbd_sent_gifts_log", JSON.stringify(updatedGifts));
 
-                                // Fire audio if available
-                                playNotificationSound();
-                                setShowPurchaseConfetti(true);
+                                  // Add Notification
+                                  const newSysNotification = {
+                                    id: "notif_g_" + Date.now(),
+                                    type: "system" as const,
+                                    title: `🎁 Gift Token Dispatched!`,
+                                    message: `Successfully transmitted "${customGiftStoreItem.name}" to ${targetFriend.name} registry locker (${formattedPriceString}).`,
+                                    timestamp: "Just Now",
+                                    isRead: false
+                                  };
+                                  setNotifications(prevNotifs => [newSysNotification, ...prevNotifs]);
 
-                                setIsGiftProcessing(false);
-                                setCustomGiftStoreItem(null);
-                                setGiftStoreTab("ledger");
-                                triggerToast("Gift Token Sent Successfully! 🎉", `Delivered velvet bundle to ${selectedFriend.name} with custom greeting!`);
-                              }, 3500);
-                            }}
-                            className={`w-full py-3.5 text-center text-xs font-black rounded-xl text-white transition-all cursor-pointer ${
-                              (friends.length === 0 || walletBalance < (customGiftStoreItem.usdPrice * 12))
-                                ? "bg-slate-300 font-bold"
-                                : "bg-rose-600 hover:bg-rose-700 shadow-md shadow-rose-200"
-                            }`}
-                          >
-                            Proceed & Authorize Sandbox Transaction
-                          </button>
-                        </>
-                      )}
+                                  // Post log
+                                  appendLog(`Dispatched Interactive ${customGiftStoreItem.name} Present to ${targetFriend.name} via Mobile Money.`);
+
+                                  // Fire audio & animation
+                                  playNotificationSound();
+                                  setShowPurchaseConfetti(true);
+
+                                  setIsGiftProcessing(false);
+                                  setCustomGiftStoreItem(null);
+                                  setGiftStoreTab("ledger");
+                                  triggerToast("Gift Token Sent Successfully! 🎉", `Delivered bundle to ${targetFriend.name} with custom greeting!`);
+                                }, 3500);
+                              }}
+                              className={`w-full py-3 rounded-full text-center text-xs font-bold text-white transition active:scale-[0.98] cursor-pointer shadow-premium ${
+                                (friends.length === 0 || walletBalance < (customGiftStoreItem.usdPrice * 12))
+                                  ? "bg-slate-200 text-slate-400 shadow-none cursor-not-allowed"
+                                  : "bg-gradient-to-r from-rose-500 via-purple-500 to-indigo-500 text-white"
+                              }`}
+                            >
+                              Send Gift
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           )}
 
@@ -8084,6 +8144,7 @@ export default function App() {
                         </button>
                       </div>
                     </div>
+                  </div>
 
                   {/* 💼 BUSINESS BULK BIRTHDAYS IMPORTER SUB CARD */}
                   <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-3 text-left">
@@ -8187,7 +8248,6 @@ export default function App() {
                   </div>
                 </div>
 
-                </div>
               </div>
             );
           })()}
@@ -8197,19 +8257,19 @@ export default function App() {
       </main>
 
       {/* MOBILE STICKY BOTTOM NAVIGATION BAR */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-slate-900 border-t border-slate-800 flex justify-around items-center px-1 z-40 shadow-2xl pb-6 pt-2" id="mobile-bottom-navigation">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-[68px] bg-white/80 backdrop-blur-md border-t border-slate-100/80 flex justify-around items-center px-2 z-40 shadow-[0_-8px_30px_rgb(0,0,0,0.02)] pb-safe" id="mobile-bottom-navigation">
         <button
           onClick={() => {
             setActiveSection("dashboard");
             window.scrollTo({ top: 0, behavior: "smooth" });
           }}
           className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all cursor-pointer ${
-            activeSection === "dashboard" ? "text-indigo-400 font-black scale-105" : "text-slate-400 hover:text-slate-200"
+            activeSection === "dashboard" ? "text-indigo-500 font-bold" : "text-slate-400 hover:text-slate-600"
           }`}
           title="Home"
         >
-          <Home className="w-4.5 h-4.5 mb-0.5" />
-          <span className="text-[9px] font-bold tracking-tight">Home</span>
+          <Home className="w-[18px] h-[18px] mb-0.5" />
+          <span className="text-[9px] font-semibold tracking-tight">Home</span>
         </button>
 
         <button
@@ -8218,19 +8278,17 @@ export default function App() {
             window.scrollTo({ top: 0, behavior: "smooth" });
           }}
           className={`flex-1 flex flex-col items-center justify-center py-1.5 relative transition-all cursor-pointer ${
-            activeSection === "registry" ? "text-indigo-400 font-black scale-105" : "text-slate-400 hover:text-slate-200"
+            activeSection === "registry" ? "text-indigo-500 font-bold" : "text-slate-400 hover:text-slate-600"
           }`}
           title="Buddies Registry"
         >
-                    <Users className="w-4.5 h-4.5 mb-0.5" />
-          <span className="text-[9px] font-bold tracking-tight">Buddies</span>
+          <Users className="w-[18px] h-[18px] mb-0.5" />
+          <span className="text-[9px] font-semibold tracking-tight">Buddies</span>
           {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length > 0 && (
-            <span className="absolute top-1 right-3.5 bg-rose-600 text-[8px] px-1 rounded text-white font-mono font-bold scale-75 border border-slate-700/60">
+            <span className="absolute top-1.5 right-4 bg-rose-500 text-[8px] px-1.5 py-0.5 rounded-full text-white font-sans font-bold scale-90 shadow-sm">
               {friends.filter(f => f.id !== "alex" && f.connectedBack === false && f.incomingRequest === true).length}
             </span>
           )}
-
-
         </button>
 
         <button
@@ -8239,12 +8297,12 @@ export default function App() {
             window.scrollTo({ top: 0, behavior: "smooth" });
           }}
           className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all cursor-pointer ${
-            activeSection === "gift-store" ? "text-indigo-400 font-black scale-105" : "text-slate-400 hover:text-slate-200"
+            activeSection === "gift-store" ? "text-indigo-500 font-bold" : "text-slate-400 hover:text-slate-600"
           }`}
           title="Gifts"
         >
-          <Gift className="w-4.5 h-4.5 mb-0.5" />
-          <span className="text-[9px] font-bold tracking-tight">Gifts</span>
+          <Gift className="w-[18px] h-[18px] mb-0.5" />
+          <span className="text-[9px] font-semibold tracking-tight">Gifts</span>
         </button>
 
         <button
@@ -8254,17 +8312,13 @@ export default function App() {
             window.scrollTo({ top: 0, behavior: "smooth" });
           }}
           className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all cursor-pointer ${
-            activeSection === "profile" && profileSubTab !== "settings" ? "text-indigo-400 font-black scale-105" : "text-slate-400 hover:text-slate-200"
+            activeSection === "profile" && profileSubTab !== "settings" ? "text-indigo-500 font-bold" : "text-slate-400 hover:text-slate-600"
           }`}
           title="Profile"
         >
-          <User className="w-4.5 h-4.5 mb-0.5" />
-          <span className="text-[9px] font-bold tracking-tight">Profile</span>
+          <User className="w-[18px] h-[18px] mb-0.5" />
+          <span className="text-[9px] font-semibold tracking-tight">Profile</span>
         </button>
-
-
-
-
 
       </nav>
 
